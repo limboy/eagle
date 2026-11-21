@@ -215,7 +215,7 @@ function folderName(id: string) {
 function matches(img: Image, except?: keyof Filters): boolean {
   const f = S.f;
   if (except !== "query" && f.query) {
-    const hay = `${img.name} ${img.tags.join(" ")} ${img.dir} ${folderName(img.folder)}`.toLowerCase();
+    const hay = `${img.name} ${img.tags.join(" ")} ${img.dir} ${folderName(img.folder)} ${img.author} ${img.caption}`.toLowerCase();
     for (const word of f.query.toLowerCase().split(/\s+/)) if (word && !hay.includes(word)) return false;
   }
   if (except !== "colors" && f.colors.size && !img.colors.some((c) => f.colors.has(c))) return false;
@@ -1183,6 +1183,7 @@ content.addEventListener("contextmenu", (e) => {
     { label: "Quick Look", kbd: "⌘Y", run: () => Library.quickLook(id).catch(fail) },
     { label: "Open with Default App", disabled: !one, run: () => Library.openExternally(id).catch(fail) },
     { label: "Show in Finder", kbd: "⇧⌘R", run: () => Library.reveal(id).catch(fail) },
+    ...(one?.link ? [{ label: linkLabel(one.link), run: () => openLink(one.link) }] : []),
     "-",
     { label: allFav ? "Remove from Favorites" : "Add to Favorites", kbd: "F", run: () => setFavorite(sel, !allFav) },
     { label: sel.length > 1 ? "Copy Paths" : "Copy Path", run: () => copyText(sel.map((i) => i.path).join("\n")) },
@@ -1270,6 +1271,56 @@ function added(folders: Folder[]) {
   toast(folders.length === 1 ? `Added ${folders[0]!.name}` : `Added ${folders.length} folders`);
 }
 
+// ---------------------------------------------------------------- captions
+
+const URL_RE = /https?:\/\/[^\s<>"']+[^\s<>"'.,;:!?)\]]/g;
+
+/** A caption as HTML: escaped, with its web links made clickable. */
+function captionHTML(text: string): string {
+  let out = "";
+  let last = 0;
+  for (const m of text.matchAll(URL_RE)) {
+    out += esc(text.slice(last, m.index));
+    const url = m[0];
+    const shown = url.replace(/^https?:\/\/(www\.)?/, "");
+    out += `<a href="${esc(url)}" data-act="open-link" data-v="${esc(url)}" title="${esc(url)}">${esc(shown.length > 40 ? shown.slice(0, 39) + "…" : shown)}</a>`;
+    last = m.index + url.length;
+  }
+  return out + esc(text.slice(last));
+}
+
+function linkLabel(link: string): string {
+  try {
+    const host = new URL(link).hostname.replace(/^www\./, "");
+    return host === "x.com" || host === "twitter.com" ? "View on X" : `Open on ${host}`;
+  } catch {
+    return "Open Original";
+  }
+}
+
+function openLink(url: string) {
+  Library.openLink(url).catch(fail);
+}
+
+/** Long captions start folded; this remembers which image was unfolded. */
+let expandedCaption: string | null = null;
+const isLongCaption = (text: string) => text.length > 280 || text.split("\n").length > 6;
+
+function captionSection(img: Image): string {
+  if (!img.caption && !img.author && !img.link) return "";
+  const long = isLongCaption(img.caption);
+  const open = expandedCaption === img.id;
+  return `
+    <div class="ins-section caption">
+      ${img.author ? `<div class="cap-author" title="${esc(img.author)}">${esc(img.author)}</div>` : ""}
+      ${img.caption ? `<p class="cap-text${long && !open ? " folded" : ""}">${captionHTML(img.caption)}</p>` : ""}
+      ${long || img.link ? `<div class="cap-actions">
+        ${long ? `<button type="button" class="link" data-act="caption-more">${open ? "Show Less" : "Show More"}</button>` : ""}
+        ${img.link ? `<button type="button" class="link" data-act="open-link" data-v="${esc(img.link)}" title="${esc(img.link)}">${esc(linkLabel(img.link))}</button>` : ""}
+      </div>` : ""}
+    </div>`;
+}
+
 // ---------------------------------------------------------------- inspector
 
 let refocusTagInput = false;
@@ -1325,6 +1376,7 @@ function inspectOne(img: Image) {
     </div>
     <div class="ins-name" title="${esc(img.name)}">${esc(img.name)}</div>
     <div class="ins-sub">${img.kind} · ${dims(img)} · ${fmtBytes(img.size)}</div>
+    ${captionSection(img)}
     <div class="ins-section" style="padding-top:16px">${paletteHTML(img.palette)}</div>
     <div class="ins-section">
       <div class="ins-row"><h4>Rating</h4><div style="display:flex;align-items:center;gap:4px">${starsHTML(img.rating)}<button type="button" class="fav-btn${img.favorite ? " on" : ""}" data-act="fav" aria-pressed="${img.favorite}" aria-label="Favorite" title="Favorite (F)">${img.favorite ? icons.heartFill : icons.heart}</button></div></div>
@@ -1408,6 +1460,11 @@ $("#inspector").addEventListener("click", (e) => {
   const sel = selected();
   const v = el.dataset.v ?? "";
   switch (el.dataset.act) {
+    case "open-link": e.preventDefault(); openLink(v); break;
+    case "caption-more":
+      expandedCaption = expandedCaption === sel[0]?.id ? null : sel[0]?.id ?? null;
+      schedule("inspector");
+      break;
     case "viewer": openViewer(); break;
     case "reveal": if (sel[0]) Library.reveal(sel[0].id).catch(fail); break;
     case "trash": trash(); break;
@@ -1594,12 +1651,24 @@ function renderViewerChrome() {
   hud.hidden = !viewer.info;
   hud.innerHTML = `
     <div><b>${esc(img.name)}</b><div class="sub">${img.kind} · ${dims(img)} · ${fmtBytes(img.size)}</div></div>
+    ${img.caption || img.author ? `<div class="cap">
+      ${img.author ? `<div class="cap-author">${esc(img.author)}</div>` : ""}
+      ${img.caption ? `<p class="cap-text">${captionHTML(img.caption)}</p>` : ""}
+      ${img.link ? `<button type="button" class="cap-link" data-act="open-link" data-v="${esc(img.link)}">${esc(linkLabel(img.link))}</button>` : ""}
+    </div>` : ""}
     ${img.palette.length ? `<div class="pal">${img.palette.map((h) => `<i style="background:${h}"></i>`).join("")}</div>` : ""}
     <dl>
       <dt>Rating</dt><dd class="${img.rating ? "rate" : ""}">${img.rating ? stars(img.rating) : "Not rated"}</dd>
       ${img.tags.length ? `<dt>Tags</dt><dd>${esc(img.tags.join(", "))}</dd>` : ""}
       <dt>Folder</dt><dd title="${esc(img.path)}">${esc(folderPath(img))}</dd>
     </dl>`;
+  // Fade the caption's bottom edge while there's more of it to scroll to.
+  const cap = hud.querySelector<HTMLElement>(".cap-text");
+  if (cap) {
+    const fade = () => cap.classList.toggle("more", cap.scrollTop + cap.clientHeight < cap.scrollHeight - 2);
+    cap.addEventListener("scroll", fade, { passive: true });
+    if (!hud.hidden) fade();
+  }
 }
 
 function renderFilmstrip() {
@@ -1683,6 +1752,7 @@ viewerEl.addEventListener("click", (e) => {
   if (!el) return;
   const img = current();
   switch (el.dataset.act) {
+    case "open-link": e.preventDefault(); openLink(el.dataset.v ?? ""); break;
     case "close": closeViewer(); break;
     case "prev": go(viewer.i - 1); break;
     case "next": go(viewer.i + 1); break;
@@ -1706,7 +1776,9 @@ viewerEl.addEventListener("dblclick", (e) => {
 });
 
 viewerEl.addEventListener("wheel", (e) => {
-  if (!viewer.open || !(e.target as HTMLElement).closest(".stage")) return;
+  const t = e.target as HTMLElement;
+  // The info panel scrolls its own caption.
+  if (!viewer.open || !t.closest(".stage") || t.closest(".hud")) return;
   e.preventDefault();
   const stage = viewerEl.querySelector<HTMLElement>(".stage")!.getBoundingClientRect();
   if (e.ctrlKey) {

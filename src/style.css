@@ -538,6 +538,19 @@ html:not(.mygo) .sidebar::before {
 .ins-section h4 { margin: 0; font-size: 11px; font-weight: 600; color: var(--text-2); }
 .ins-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 
+/* Caption from a sidecar file, such as a tweet's text */
+.caption { gap: 6px; }
+.cap-author { font-size: 12px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cap-text {
+  margin: 0; font-size: 12.5px; line-height: 1.5;
+  white-space: pre-wrap; overflow-wrap: anywhere;
+  -webkit-user-select: text; user-select: text;
+}
+.cap-text.folded { display: -webkit-box; -webkit-line-clamp: 6; -webkit-box-orient: vertical; overflow: hidden; }
+.cap-text a { color: var(--accent); text-decoration: none; }
+.cap-text a:hover { text-decoration: underline; }
+.cap-actions { display: flex; flex-wrap: wrap; gap: 2px; margin-left: -6px; }
+
 .palette { display: flex; height: 30px; border-radius: 7px; overflow: hidden; box-shadow: 0 0 0 0.5px var(--hairline); }
 .palette.thin { height: 22px; border-radius: 6px; }
 .palette button { position: relative; flex: 1 1 0; padding: 0; border: 0; transition: flex-grow 0.2s; }
@@ -733,6 +746,23 @@ dl.info dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; o
 .viewer .hud dt { color: rgba(255, 255, 255, 0.62); }
 .viewer .hud dd { margin: 0; text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .viewer .hud .rate { color: var(--star); letter-spacing: 1px; }
+.viewer .hud .cap { display: flex; flex-direction: column; gap: 6px; }
+.viewer .hud .cap-author { color: rgba(255, 255, 255, 0.92); }
+.viewer .hud .cap-text {
+  max-height: 168px; overflow-y: auto; overscroll-behavior: contain;
+  font-size: 12px; color: rgba(255, 255, 255, 0.86);
+}
+.viewer .hud .cap-text.more {
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 28px), transparent);
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 28px), transparent);
+}
+.viewer .hud .cap-text a { color: #8fb6ff; }
+.viewer .hud .cap-link {
+  align-self: flex-start;
+  border: 0; border-radius: 6px; padding: 4px 9px;
+  background: rgba(255, 255, 255, 0.13); color: #fff; font-size: 12px;
+}
+.viewer .hud .cap-link:hover { background: rgba(255, 255, 255, 0.22); }
 .filmstrip {
   position: relative; z-index: 2;
   height: 92px; flex: none;

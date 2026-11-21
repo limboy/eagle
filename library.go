@@ -65,6 +65,11 @@ type Image struct {
 	Rating   int      `json:"rating"`
 	Favorite bool     `json:"favorite"`
 	Tags     []string `json:"tags"`
+	// Caption, Author and Link come from the image's sidecar file, such
+	// as the metadata gallery-dl saves with a tweet's images; "" without one.
+	Caption string `json:"caption"`
+	Author  string `json:"author"`
+	Link    string `json:"link"`
 	// Version changes whenever the file does; image URLs carry it so the
 	// page never shows a stale thumbnail.
 	Version string `json:"version"`
@@ -392,6 +397,14 @@ func (l *Library) OpenExternally(id string) error {
 	return mygo.Shell.OpenPath(p)
 }
 
+// OpenLink opens a web link, such as an image's source, in the browser.
+func (l *Library) OpenLink(url string) error {
+	if !isWebLink(url) {
+		return errors.New("only web links can be opened")
+	}
+	return mygo.Shell.OpenExternal(url)
+}
+
 // QuickLook shows an image in the Quick Look panel.
 func (l *Library) QuickLook(id string) error {
 	p, err := l.pathOf(id)
@@ -568,6 +581,7 @@ func (l *Library) scan(id string) {
 	l.mu.Unlock()
 
 	var files []found
+	sidecars := map[string]bool{}
 	err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			if p == root {
@@ -590,6 +604,9 @@ func (l *Library) scan(id string) {
 		}
 		kind, ok := kindByExt[strings.ToLower(filepath.Ext(name))]
 		if !ok {
+			if isSidecar(name) && d.Type().IsRegular() {
+				sidecars[p] = true
+			}
 			return nil
 		}
 		info, err := d.Info()
@@ -628,6 +645,10 @@ func (l *Library) scan(id string) {
 			Tags:     []string{},
 		}
 		images[i] = img
+		if sc := sidecarFor(fl.path, sidecars); sc != "" {
+			s := readSidecar(sc)
+			img.Caption, img.Author, img.Link = s.Caption, s.Author, s.Link
+		}
 		l.mu.Lock()
 		c := l.cache[img.Version]
 		if m := l.meta[img.ID]; m != nil {
@@ -832,7 +853,7 @@ func (l *Library) watch(ctx context.Context, id, root string) {
 				return skipDirExt[strings.ToLower(filepath.Ext(base))]
 			}
 			_, ok := kindByExt[strings.ToLower(filepath.Ext(base))]
-			return !ok
+			return !ok && !isSidecar(base)
 		},
 	})
 	if err != nil {

@@ -14,12 +14,37 @@ Eagle indexes folders where they are. Nothing is imported, copied or moved, and 
 
 - **Library.** Browse in a justified layout that keeps each image's shape, or in an even grid. Images are grouped by date, and the thumbnail size is adjustable. Large libraries stay smooth because only what's on screen is drawn.
 - **Sidebar.** All Images, Recent (modified in the last 30 days), Favorites and Untagged; each folder you've added, with its subfolders; and your tags.
-- **Filters.** Filter by colour, file type, shape (landscape, portrait, square, panorama), resolution, rating and date. Search matches file names, tags and folder names as you type. Every image gets a five-colour palette when it's indexed, which is what colour filtering uses.
-- **Inspector.** For one image: its palette, rating, favourite, tags and file details. For several: their shared palette, and rating and tagging for all of them at once. With nothing selected: a summary of what's in view.
+- **Filters.** Filter by colour, file type, shape (landscape, portrait, square, panorama), resolution, rating and date. Search matches file names, captions, authors, tags and folder names as you type. Every image gets a five-colour palette when it's indexed, which is what colour filtering uses.
+- **Inspector.** For one image: its caption, palette, rating, favourite, tags and file details. For several: their shared palette, and rating and tagging for all of them at once. With nothing selected: a summary of what's in view.
 - **Viewer.** Full-window viewing with fit and 1:1 zoom, pinch to zoom, drag to pan, a filmstrip and an info panel.
+- **Captions.** A text file saved next to an image becomes its caption. See [Captions from sidecar files](#captions-from-sidecar-files).
 - **File handling.** Quick Look, Show in Finder, Open with the default app, and Move to Trash with Undo.
 
 Supported formats are JPEG, PNG, GIF, WebP, HEIC, TIFF, BMP, AVIF and camera RAW (ARW, CR2, CR3, NEF, RAF, DNG, ORF, RW2, PEF, SRW). Formats a web view can't show are converted to JPEG previews with macOS's `sips`.
+
+## Captions from sidecar files
+
+An image file holds only pixels, so an image saved from X (Twitter) or another site arrives without the post's text. Eagle reads that text from a sidecar file, a file saved next to the image with the same name, and shows it in the inspector and the viewer's info panel. Search covers it too.
+
+For each image, Eagle uses the first of these it finds:
+
+| Sidecar | What it is |
+| --- | --- |
+| `photo.jpg.json` | Metadata written by [gallery-dl](https://github.com/mikf/gallery-dl) with `--write-metadata` |
+| `photo.json` | The same, saved without the image's extension |
+| `photo.jpg.txt` or `photo.txt` | A plain-text note, shown as it is |
+
+For posts from X, Eagle also shows the author (for example "NASA (@nasa)") and a **View on X** button that opens the post in your browser. For other sites gallery-dl supports, it shows the post's text and author and, when the metadata has one, a link to the post. HTML in captions is shown as plain text, and links in a caption can be clicked.
+
+To save posts from X with their text, have gallery-dl write the metadata next to each image. X needs you to be signed in, so pass the cookies from a browser where you are:
+
+```bash
+gallery-dl --write-metadata --cookies-from-browser safari -d ~/Pictures/X "https://x.com/USER/status/ID"
+```
+
+Replace the address with the post's, and `~/Pictures/X` with a folder you've added to Eagle (gallery-dl saves into subfolders of it, which Eagle sees too). Use `chrome` or `firefox` in place of `safari` for those browsers.
+
+The images appear with their captions as soon as they're downloaded. Sidecars are only read, never changed; edit or delete one and Eagle picks up the change. Files larger than 1 MB are ignored, and captions longer than 5,000 characters are cut.
 
 ## Keyboard
 
@@ -87,6 +112,7 @@ Other scripts:
 | `main.go` | Window, menus and app startup |
 | `library.go` | Folders, scanning and watching, indexing, ratings and tags, trash, and the `eagle://` scheme that serves thumbnails and previews |
 | `imaging.go` | Dimensions and orientation, thumbnails and previews, palettes and colour families |
+| `sidecar.go` | Finding and reading sidecar files: captions, authors and links |
 | `src/main.ts` | The whole interface: sidebar, grid, filters, inspector and viewer |
 | `src/style.css` | Styles, light and dark |
 | `src/icons.ts` | Interface icons |

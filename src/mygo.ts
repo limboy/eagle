@@ -58,6 +58,13 @@ export interface Image {
   favorite: boolean;
   tags: string[];
   /**
+   * Caption, Author and Link come from the image's sidecar file, such
+   * as the metadata gallery-dl saves with a tweet's images; "" without one.
+   */
+  caption: string;
+  author: string;
+  link: string;
+  /**
    * Version changes whenever the file does; image URLs carry it so the
    * page never shows a stale thumbnail.
    */
@@ -116,6 +123,8 @@ export const Library = {
   openExternally: bind<[string], void>("Library.OpenExternally", (id: string) => [id]),
   /** OpenFolder opens one of the library's folders in Finder. */
   openFolder: bind<[string], void>("Library.OpenFolder", (id: string) => [id]),
+  /** OpenLink opens a web link, such as an image's source, in the browser. */
+  openLink: bind<[string], void>("Library.OpenLink", (url: string) => [url]),
   /** QuickLook shows an image in the Quick Look panel. */
   quickLook: bind<[string], void>("Library.QuickLook", (id: string) => [id]),
   /** RemoveFolder takes a folder out of the library. Its files stay on disk. */
