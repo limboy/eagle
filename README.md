@@ -44,9 +44,19 @@ In the viewer: ← → move between images, + − zoom, 0 fits the image to the 
 
 ⌘-click or ⇧-click a colour swatch to filter by several colours at once.
 
+## Install
+
+Eagle is built from source. It needs macOS, [Go](https://go.dev) 1.27 or later and [Bun](https://bun.sh).
+
+```bash
+bun run install:app
+```
+
+This builds Eagle for your Mac, installs it in `/Applications` (or `~/Applications` if `/Applications` isn't writable), replacing any copy already there, and opens it. Run it again after pulling changes to update. To install without opening, pass `--no-open` to `scripts/install.sh`; to install somewhere else, set `INSTALL_DIR`. The app is signed ad hoc, which is fine for the Mac that built it; to share it with other Macs, it needs a Developer ID signature and notarization (see `mygo build`).
+
 ## Development
 
-Eagle is built with [MyGo](https://github.com/egoist/mygo): a Go backend with a TypeScript and Vite frontend in the system web view. It needs macOS, [Go](https://go.dev) 1.27 or later and [Bun](https://bun.sh).
+Eagle is built with [MyGo](https://github.com/egoist/mygo): a Go backend with a TypeScript and Vite frontend in the system web view.
 
 ```bash
 bun install
@@ -83,5 +93,6 @@ Other scripts:
 | `src/mygo.ts` | Generated client for the Go methods (don't edit) |
 | `resources/icon.png` | App icon |
 | `design/` | Icon source: `make-icon.py` writes `icon.svg` |
+| `scripts/install.sh` | Builds Eagle and installs it in Applications |
 
-The library (folders, ratings, favourites and tags) is saved in `~/Library/Application Support/eagle/library.json`. Thumbnails, previews and the index are kept in `~/Library/Caches/eagle/`. Ratings and tags live in Eagle's library, not in your image files. Development builds use `eagle Dev` in place of `eagle` for both folders.
+The library (folders, ratings, favourites and tags) is saved in `~/Library/Application Support/Eagle/library.json`. Thumbnails, previews and the index are kept in `~/Library/Caches/Eagle/`. Ratings and tags live in Eagle's library, not in your image files. Development builds use `Eagle Dev` in place of `Eagle` for both folders.

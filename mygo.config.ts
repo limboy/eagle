@@ -1,7 +1,7 @@
 import { defineConfig } from "mygo-cli";
 
 export default defineConfig({
-  name: "eagle",
+  name: "Eagle",
   identifier: "com.example.eagle",
   version: "0.1.0",
   // `mygo dev` runs devCommand and loads devUrl; `mygo build` runs
