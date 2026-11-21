@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Eagle</title>
+    <link rel="stylesheet" href="./src/style.css" />
+  </head>
+  <body>
+    <div class="window" id="window">
+      <nav class="sidebar" id="sidebar" aria-label="Library"></nav>
+
+      <main class="main">
+        <header class="toolbar">
+          <div class="title">
+            <h1 id="title">All Images</h1>
+            <span class="subtitle num" id="subtitle"></span>
+          </div>
+          <div class="tools" id="tools">
+            <div class="segmented" role="group" aria-label="Layout">
+              <button type="button" id="layout-justified" aria-label="Justified layout" title="Justified (⌘1)"></button>
+              <button type="button" id="layout-grid" aria-label="Grid layout" title="Grid (⌘2)"></button>
+            </div>
+            <label class="zoom" title="Thumbnail size (⌘+ / ⌘−)">
+              <span id="zoom-small"></span>
+              <input type="range" id="zoom" min="100" max="380" step="10" aria-label="Thumbnail size" />
+              <span id="zoom-large"></span>
+            </label>
+            <button type="button" class="tb-btn" id="sort"></button>
+            <label class="search">
+              <span id="search-icon"></span>
+              <input type="search" id="search" placeholder="Search names, tags, folders" aria-label="Search" autocomplete="off" spellcheck="false" />
+              <kbd>⌘F</kbd>
+              <button type="button" class="clear" id="search-clear" aria-label="Clear search" hidden></button>
+            </label>
+            <button type="button" class="tb-btn" id="toggle-inspector" aria-label="Toggle inspector" title="Inspector (⌘I)"></button>
+          </div>
+        </header>
+        <div class="filterbar" id="filterbar"></div>
+        <div class="content" id="content" tabindex="-1">
+          <div class="canvas" id="canvas"></div>
+          <div class="empty" id="empty" hidden></div>
+        </div>
+        <footer class="statusbar num" id="statusbar"></footer>
+      </main>
+
+      <aside class="inspector" id="inspector" aria-label="Inspector"></aside>
+
+      <div class="dropzone" id="dropzone" aria-hidden="true">
+        <div class="dropzone-card">
+          <div class="dropzone-icon" id="dropzone-icon"></div>
+          <strong>Drop to add to your library</strong>
+          <span>Folders are indexed where they are. Nothing is copied or moved.</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="viewer" id="viewer" hidden></div>
+    <div class="popover" id="popover" hidden></div>
+    <div class="toast" id="toast" role="status"></div>
+
+    <script type="module" src="./src/main.ts"></script>
+  </body>
+</html>
