@@ -18,6 +18,7 @@ Eagle indexes folders where they are. Nothing is imported, copied or moved, and 
 - **Inspector.** For one image: its caption, palette, rating, favourite, tags and file details. For several: their shared palette, and rating and tagging for all of them at once. With nothing selected: a summary of what's in view.
 - **Viewer.** Full-window viewing with fit and 1:1 zoom, pinch to zoom, drag to pan, a filmstrip and an info panel.
 - **Captions.** A text file saved next to an image becomes its caption. See [Captions from sidecar files](#captions-from-sidecar-files).
+- **AI descriptions and search.** A vision model can describe each image, and search then finds images by what's in them, even in another language. See [AI descriptions and search](#ai-descriptions-and-search).
 - **File handling.** Quick Look, Show in Finder, Open with the default app, and Move to Trash with Undo.
 
 Supported formats are JPEG, PNG, GIF, WebP, HEIC, TIFF, BMP, AVIF and camera RAW (ARW, CR2, CR3, NEF, RAF, DNG, ORF, RW2, PEF, SRW). Formats a web view can't show are converted to JPEG previews with macOS's `sips`.
@@ -46,6 +47,26 @@ Replace the address with the post's, and `~/Pictures/X` with a folder you've add
 
 The images appear with their captions as soon as they're downloaded. Sidecars are only read, never changed; edit or delete one and Eagle picks up the change. Files larger than 1 MB are ignored, and captions longer than 5,000 characters are cut.
 
+## AI descriptions and search
+
+Eagle can send each image's thumbnail to [OpenCode Go](https://opencode.ai/docs/go/), where a vision model describes it in a few sentences and a line of keywords. The description shows in the inspector and the viewer's info panel, and clicking a keyword searches for it. Search then matches the words of descriptions, and with **Search by meaning** on it also finds images whose descriptions are close in meaning to what you type, best first: "a person walking alone" finds the lone figure on a path, and 撑伞的人 finds the one with an umbrella though its description is in English.
+
+To set it up, choose **Eagle › Settings…** (⌘,):
+
+| Setting | What it does |
+| --- | --- |
+| API key | A key of a workspace with OpenCode Go, from the [OpenCode console](https://opencode.ai/console). Eagle keeps it in your Keychain. |
+| Model | The Go model that describes images. DeepSeek V4.1 Flash is the default; a model must be turned on for your workspace in the console. |
+| Language | What descriptions are written in. |
+| Describe every image | Describes the whole library, and new images as they arrive. Off, images are described only when you ask. |
+| Search by meaning | Embeds descriptions and captions with Zen's `text-embedding-3-large`, about 2 cents per thousand images. It needs a Zen balance in the same workspace. Off, search matches words only. |
+
+Descriptions always come from Go and count toward its allowance. When the allowance runs out, describing waits until it resets, which Eagle asks Go for, and the sidebar shows when that is; it never moves to Zen, so describing never draws on your Zen balance. Only search by meaning uses Zen.
+
+**Test** describes a small test image with the key and model chosen. To describe images yourself, or describe them again, select them and choose **Describe with AI** (⇧⌘D) from the File menu or their context menu. The sidebar shows how many images are described. When the key or the model is refused, describing pauses until you fix the setting or click **Resume**.
+
+Descriptions are kept in `~/Library/Application Support/Eagle/descriptions.json`, and search vectors in `~/Library/Caches/Eagle/vectors.gob`. A description belongs to a version of a file, so an image is described again after the file changes.
+
 ## Keyboard
 
 | Keys | Action |
@@ -64,6 +85,8 @@ The images appear with their captions as soon as they're downloaded. Sidecars ar
 | ⌘= / ⌘− | Larger / smaller thumbnails |
 | ⇧⌘F | Show or hide the filter bar |
 | ⌘I | Show or hide the inspector |
+| ⇧⌘D | Describe with AI |
+| ⌘, | Settings |
 
 In the viewer: ← → move between images, + − zoom, 0 fits the image to the window, 1 shows it at actual size, I toggles the info panel, and Esc or Space closes it.
 
@@ -103,7 +126,7 @@ Other scripts:
 
 - `bun run generate` regenerates `src/mygo.ts`, the typed client for the Go methods, after you change them.
 - `bun run typecheck` and `go vet ./...` check the code.
-- `go test ./...` runs the Go tests.
+- `go test ./...` runs the Go tests. They talk to a fake OpenCode; `TestLiveOpenCode` talks to the real one when `OPENCODE_API_KEY` and `EAGLE_LIVE_DIR` are set (see `ai_live_test.go`).
 
 ### Where things are
 
@@ -113,6 +136,7 @@ Other scripts:
 | `library.go` | Folders, scanning and watching, indexing, ratings and tags, trash, and the `eagle://` scheme that serves thumbnails and previews |
 | `imaging.go` | Dimensions and orientation, thumbnails and previews, palettes and colour families |
 | `sidecar.go` | Finding and reading sidecar files: captions, authors and links |
+| `ai.go` | AI descriptions and search: the OpenCode client, the queue of images to describe, embeddings and ranking |
 | `src/main.ts` | The whole interface: sidebar, grid, filters, inspector and viewer |
 | `src/style.css` | Styles, light and dark |
 | `src/icons.ts` | Interface icons |

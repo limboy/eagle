@@ -70,6 +70,9 @@ type Image struct {
 	Caption string `json:"caption"`
 	Author  string `json:"author"`
 	Link    string `json:"link"`
+	// Description is what a vision model saw in the image, "" until it
+	// is described.
+	Description string `json:"description"`
 	// Version changes whenever the file does; image URLs carry it so the
 	// page never shows a stale thumbnail.
 	Version string `json:"version"`
@@ -173,11 +176,13 @@ type Library struct {
 	updMu   sync.Mutex
 	updates []ImageUpdate
 	updTime *time.Timer
+
+	ai *AI
 }
 
 func newLibrary() *Library {
 	n := min(max(runtime.NumCPU()-2, 2), 6)
-	return &Library{
+	l := &Library{
 		images:   map[string]*Image{},
 		meta:     map[string]*meta{},
 		cache:    map[string]*cached{},
@@ -186,6 +191,8 @@ func newLibrary() *Library {
 		work:     make(chan struct{}, n),
 		onDemand: make(chan struct{}, 3),
 	}
+	l.ai = newAI(l)
+	return l
 }
 
 // start loads the library and indexes its folders. It runs once the app is
@@ -211,6 +218,7 @@ func (l *Library) start() {
 	if b, err := os.ReadFile(filepath.Join(cache, "index.json")); err == nil {
 		_ = json.Unmarshal(b, &l.cache)
 	}
+	l.ai.load()
 	l.mu.Lock()
 	if saved.Meta != nil {
 		l.meta = saved.Meta
@@ -649,6 +657,7 @@ func (l *Library) scan(id string) {
 			s := readSidecar(sc)
 			img.Caption, img.Author, img.Link = s.Caption, s.Author, s.Link
 		}
+		img.Description = l.ai.descriptionOf(img.Version)
 		l.mu.Lock()
 		c := l.cache[img.Version]
 		if m := l.meta[img.ID]; m != nil {
@@ -711,6 +720,7 @@ func (l *Library) scan(id string) {
 	_ = FoldersChanged.Broadcast(folders)
 
 	go l.watch(ctx, id, root)
+	go l.ai.sync()
 	if len(todo) > 0 {
 		l.index(ctx, id, todo)
 	}

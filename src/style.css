@@ -615,6 +615,108 @@ dl.info dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; o
 .color-bars .track i { display: block; height: 100%; border-radius: 2px; box-shadow: inset 0 0 0 0.5px rgba(0, 0, 0, 0.18); }
 .color-bars .n { width: 34px; text-align: right; color: var(--text-2); font-variant-numeric: tabular-nums; }
 
+/* AI descriptions */
+.ai-desc h4 { display: inline-flex; align-items: center; gap: 5px; }
+.ai-desc h4 .icon { width: 12px; height: 12px; color: var(--accent); }
+.ai-desc .ins-row .link { margin: -4px -6px -4px 0; font-size: 12px; }
+.ai-desc .link[disabled] { color: var(--text-2); background: none; }
+.desc-text {
+  margin: 0; font-size: 12.5px; line-height: 1.5;
+  white-space: pre-wrap; overflow-wrap: anywhere;
+  -webkit-user-select: text; user-select: text;
+}
+.desc-empty { margin: 0; font-size: 12px; color: var(--text-2); }
+.keywords { display: flex; flex-wrap: wrap; gap: 4px; }
+.keywords button {
+  height: 20px; padding: 0 7px;
+  border: 0; border-radius: 10px;
+  background: var(--fill); color: var(--text-2); font-size: 11.5px;
+}
+.keywords button:hover { background: var(--selection); color: var(--accent); }
+.desc-loading { display: flex; flex-direction: column; gap: 7px; padding: 2px 0; }
+.desc-loading i {
+  display: block; height: 9px; border-radius: 4px;
+  background: linear-gradient(90deg, var(--fill) 0%, var(--fill-active) 50%, var(--fill) 100%) 0 0 / 200% 100%;
+  animation: shimmer 1.3s linear infinite;
+}
+@keyframes shimmer { to { background-position: -200% 0; } }
+.actions-col .btn .icon { width: 13px; height: 13px; color: var(--accent); }
+
+.ai-foot {
+  display: flex; align-items: center; gap: 7px;
+  height: 22px; margin: -3px -6px 2px; padding: 0 6px;
+  border: 0; border-radius: 6px;
+  background: none; color: var(--text-2); font-size: 11px; text-align: left;
+}
+.ai-foot .icon { flex: none; width: 13px; height: 13px; color: var(--accent); }
+.ai-foot > span:not(.bar) { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+button.ai-foot:hover { background: var(--fill); color: var(--text); }
+.ai-foot .bar { flex: 1; height: 3px; border-radius: 2px; background: var(--fill-active); overflow: hidden; }
+.ai-foot .bar i { display: block; height: 100%; background: var(--accent); border-radius: 2px; transition: width 0.25s; }
+.ai-foot.busy .num { flex: none; font-variant-numeric: tabular-nums; }
+.ai-foot.paused .icon { color: var(--star); }
+.ai-foot .link { flex: none; padding: 2px 5px; font-size: 11px; }
+
+/* ---------------- AI settings sheet ---------------- */
+
+.sheet {
+  position: fixed; inset: 0; z-index: 55;
+  display: grid; place-items: start center;
+  padding: 72px 16px 16px; overflow-y: auto;
+  background: rgba(0, 0, 0, 0.22);
+  animation: fade 0.15s;
+}
+.sheet-card {
+  width: min(520px, 100%);
+  padding: 22px 24px 18px;
+  border-radius: 14px;
+  background: var(--raised);
+  box-shadow: var(--shadow-pop);
+  display: flex; flex-direction: column; gap: 14px;
+  animation: pop 0.18s cubic-bezier(0.2, 0.8, 0.3, 1);
+}
+.sheet-card header { display: flex; gap: 14px; align-items: flex-start; padding-bottom: 4px; }
+.sheet-icon {
+  flex: none; display: grid; place-items: center;
+  width: 38px; height: 38px; border-radius: 10px;
+  background: var(--selection); color: var(--accent);
+}
+.sheet-icon .icon { width: 20px; height: 20px; }
+.sheet-card h2 { margin: 1px 0 4px; font-size: 15px; font-weight: 600; letter-spacing: -0.01em; }
+.sheet-card header p { margin: 0; font-size: 12.5px; line-height: 1.45; color: var(--text-2); }
+.field { display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 10px; align-items: start; }
+.field .label { padding-top: 6px; font-size: 12.5px; color: var(--text-2); text-align: right; }
+.field .key-row { display: flex; gap: 6px; }
+.field .key-row input { flex: 1; min-width: 0; }
+.field input:not([type=checkbox]), .field select {
+  width: 100%; height: 28px; padding: 0 9px;
+  border: 0.5px solid var(--hairline-strong); border-radius: 7px;
+  background: var(--canvas); font-size: 12.5px; outline: none;
+  -webkit-user-select: text; user-select: text;
+}
+.field select { padding-right: 4px; }
+.field input:focus, .field select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent); }
+.field .btn { height: 28px; padding: 0 12px; }
+.sheet-card .hint { margin: 6px 0 0; font-size: 11.5px; line-height: 1.45; color: var(--text-2); }
+.sheet-card .hint a { color: var(--accent); text-decoration: none; }
+.sheet-card .hint a:hover { text-decoration: underline; }
+.sheet-card .check { display: flex; gap: 10px; align-items: flex-start; padding-left: 102px; }
+.sheet-card .check input { margin: 2px 0 0; accent-color: var(--accent); }
+.sheet-card .check span { display: flex; flex-direction: column; gap: 3px; }
+.sheet-card .check b { font-weight: 500; font-size: 12.5px; }
+.sheet-card .check small { font-size: 11.5px; line-height: 1.45; color: var(--text-2); }
+.sheet-card .check small:empty { display: none; }
+.sheet-card .check small.err, .sheet-card .test-result.error { color: #e5484d; }
+.sheet-card footer { display: flex; align-items: center; gap: 8px; padding-top: 6px; border-top: 0.5px solid var(--hairline); margin-top: 2px; padding-top: 14px; }
+.test-result { flex: 1; min-width: 0; font-size: 11.5px; line-height: 1.4; color: var(--text-2); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.test-result.ok { color: #2f8f46; }
+@media (prefers-color-scheme: dark) { .test-result.ok { color: #63c174; } }
+@media (max-width: 560px) {
+  .field { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+  .field .label { text-align: left; padding-top: 0; }
+  .sheet-card .check { padding-left: 0; }
+}
+
 /* ---------------- popover ---------------- */
 
 .popover {

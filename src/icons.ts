@@ -43,5 +43,6 @@ export const icons = {
   portrait: svg(`<rect x="4" y="1.75" width="8" height="12.5" rx="1.5"/>`),
   square: svg(`<rect x="3" y="3" width="10" height="10" rx="1.5"/>`),
   panorama: svg(`<rect x="0.75" y="5.5" width="14.5" height="5" rx="1.3"/>`),
+  sparkle: svg(`<path d="M7 2.2l1.15 3.15L11.3 6.5 8.15 7.65 7 10.8 5.85 7.65 2.7 6.5l3.15-1.15z"/><path d="M12 9.6l.55 1.35 1.35.55-1.35.55L12 13.4l-.55-1.35-1.35-.55 1.35-.55z"/>`),
   drop: svg(`<path d="M8 2.5v8M4.8 7.4L8 10.6l3.2-3.2M2.5 11v1.3c0 .7.6 1.2 1.2 1.2h8.6c.7 0 1.2-.5 1.2-1.2V11"/>`, 18),
 };

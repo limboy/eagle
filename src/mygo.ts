@@ -4,6 +4,84 @@ import { bind, event } from "mygo-runtime";
 
 // ---- Types ----
 
+/** AIConfig is the settings with what the settings page shows beside them. */
+export interface AIConfig {
+  settings: AISettings;
+  /** HasKey tells whether an API key is saved. */
+  hasKey: boolean;
+  /** Models are the vision models of OpenCode Go to choose from. */
+  models: AIModel[];
+}
+
+/** AIModel is a vision model the user can pick. */
+export interface AIModel {
+  id: string;
+  name: string;
+  /** Price is what it costs per million tokens in and out, in dollars. */
+  price: string;
+}
+
+/** AISettings are what the user chose for describing and searching images. */
+export interface AISettings {
+  /** Model is the vision model of OpenCode Go that describes images. */
+  model: string;
+  /** Language is what descriptions are written in, such as "English". */
+  language: string;
+  /**
+   * Auto describes every image of the library, new ones as they come;
+   * otherwise only those the user asks for.
+   */
+  auto: boolean;
+  /**
+   * Search embeds descriptions and captions on Zen, for search by
+   * meaning; otherwise search only matches their words.
+   */
+  search: boolean;
+}
+
+/** AIStatus is how far describing and embedding have come. */
+export interface AIStatus {
+  /** Ready is true once an API key is saved. */
+  ready: boolean;
+  auto: boolean;
+  /** Search is true when search by meaning is on and working. */
+  search: boolean;
+  /**
+   * Described and Total count the library's images with a description,
+   * and all of them.
+   */
+  described: number;
+  total: number;
+  /**
+   * Pending counts the images waiting to be described or being
+   * described now.
+   */
+  pending: number;
+  /** Working lists the IDs of the images being described now. */
+  working: string[];
+  /** Paused tells why describing stopped, "" while it runs. */
+  paused: string;
+  /**
+   * ResumesAt is when describing goes on by itself, in Unix
+   * milliseconds, as when Go's allowance resets; 0 when it waits for
+   * the user.
+   */
+  resumesAt: number;
+  /**
+   * SearchError tells why search by meaning is off although the user
+   * turned it on, "" when it works.
+   */
+  searchError: string;
+  /** LastError is the latest failure that didn't stop describing. */
+  lastError: string;
+}
+
+/** Description is an image's new description. */
+export interface Description {
+  id: string;
+  description: string;
+}
+
 /**
  * Folder is a folder the user added to the library. Its images stay where
  * they are: Eagle only indexes them.
@@ -65,6 +143,11 @@ export interface Image {
   author: string;
   link: string;
   /**
+   * Description is what a vision model saw in the image, "" until it
+   * is described.
+   */
+  description: string;
+  /**
    * Version changes whenever the file does; image URLs carry it so the
    * page never shows a stale thumbnail.
    */
@@ -91,6 +174,12 @@ export type Kind = "JPG" | "PNG" | "HEIC" | "WEBP" | "GIF" | "TIFF" | "BMP" | "A
 export interface Progress {
   done: number;
   total: number;
+}
+
+/** SearchHit is an image that matches a search, with how closely. */
+export interface SearchHit {
+  id: string;
+  score: number;
 }
 
 /** Snapshot is the whole library. */
@@ -150,10 +239,44 @@ export const Library = {
   trash: bind<[string[]], string[]>("Library.Trash", (ids: string[]) => [ids]),
 } as const;
 
+/** AI is the service pages call to set up and use descriptions and search. */
+export const AI = {
+  /** Config returns the settings, whether a key is saved and the models. */
+  config: bind<[], AIConfig>("AI.Config", () => []),
+  /**
+   * Describe describes images, again when again is true, ahead of those
+   * waiting.
+   */
+  describe: bind<[string[], boolean], void>("AI.Describe", (ids: string[], again: boolean) => [ids, again]),
+  /** Resume starts describing again after it paused. */
+  resume: bind<[], void>("AI.Resume", () => []),
+  /**
+   * Search returns the images whose descriptions and captions are closest
+   * in meaning to query, best first. It returns none while search by
+   * meaning is off, and pages then match words only.
+   */
+  search: bind<[string], SearchHit[]>("AI.Search", (query: string) => [query]),
+  /** SetKey saves the API key in the Keychain, or removes it when key is "". */
+  setKey: bind<[string], void>("AI.SetKey", (key: string) => [key]),
+  /** SetSettings saves new settings and starts what they ask for. */
+  setSettings: bind<[AISettings], AISettings>("AI.SetSettings", (s: AISettings) => [s]),
+  /** Status returns how far describing has come. */
+  status: bind<[], AIStatus>("AI.Status", () => []),
+  /**
+   * Test checks a key, or the saved one when key is "", by describing a
+   * tiny image with the model given. It returns the description.
+   */
+  test: bind<[string, string], string>("AI.Test", (key: string, model: string) => [key, model]),
+} as const;
+
 // ---- Events ----
 
 /** Events sent by the Go side. Subscribe with `events.name.on(listener)`. */
 export const events = {
+  /** AIStatusChanged is sent whenever describing makes progress or stops. */
+  aiStatus: event<AIStatus>("aiStatus"),
+  /** DescriptionsChanged is sent in batches as images are described. */
+  descriptions: event<Description[]>("descriptions"),
   /**
    * FoldersChanged is sent when folders are added, removed, recounted or make
    * progress indexing.

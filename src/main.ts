@@ -2,7 +2,7 @@
 // and the viewer. Go owns the library (src/mygo.ts is generated from it);
 // this page keeps a copy of it and renders what the user asks to see.
 import { isMyGo, onFileDrop } from "mygo-runtime";
-import { Library, events, type Folder, type Image, type Kind } from "./mygo";
+import { AI, Library, events, type AIConfig, type AISettings, type AIStatus, type Folder, type Image, type Kind } from "./mygo";
 import { icons } from "./icons";
 
 if (isMyGo()) document.documentElement.classList.add("mygo");
@@ -178,6 +178,7 @@ const S = {
   anchor: null as string | null,
   focus: null as string | null,
   expanded: new Set<string>(),
+  ai: null as AIStatus | null,
 };
 
 function savePrefs() {
@@ -212,12 +213,16 @@ function folderName(id: string) {
   return S.folders.find((f) => f.id === id)?.name ?? "";
 }
 
+/** Whether every word of query is in what the image is known by. */
+function wordsMatch(img: Image, query: string): boolean {
+  const hay = `${img.name} ${img.tags.join(" ")} ${img.dir} ${folderName(img.folder)} ${img.author} ${img.caption} ${img.description}`.toLowerCase();
+  for (const word of query.toLowerCase().split(/\s+/)) if (word && !hay.includes(word)) return false;
+  return true;
+}
+
 function matches(img: Image, except?: keyof Filters): boolean {
   const f = S.f;
-  if (except !== "query" && f.query) {
-    const hay = `${img.name} ${img.tags.join(" ")} ${img.dir} ${folderName(img.folder)} ${img.author} ${img.caption}`.toLowerCase();
-    for (const word of f.query.toLowerCase().split(/\s+/)) if (word && !hay.includes(word)) return false;
-  }
+  if (except !== "query" && f.query && !wordsMatch(img, f.query) && semScore(img.id) === undefined) return false;
   if (except !== "colors" && f.colors.size && !img.colors.some((c) => f.colors.has(c))) return false;
   if (except !== "kinds" && f.kinds.size && !f.kinds.has(img.kind)) return false;
   if (except !== "shapes" && f.shapes.size) {
@@ -260,9 +265,62 @@ function list(): Image[] {
   if (!listCache) {
     listCache = [];
     for (const img of S.images.values()) if (inSource(img) && matches(img)) listCache.push(img);
-    listCache.sort(compare);
+    if (byRelevance()) {
+      // Best matches first: closest in meaning, with a lift for images
+      // that hold the words searched for.
+      const rel = new Map(listCache.map((i) => [i.id, (semScore(i.id) ?? 0) + (wordsMatch(i, S.f.query) ? 0.15 : 0)]));
+      listCache.sort((a, b) => rel.get(b.id)! - rel.get(a.id)! || compare(a, b));
+    } else listCache.sort(compare);
   }
   return listCache;
+}
+
+// ---------------------------------------------------------------- search by meaning
+
+/** The latest results of AI.search: how close each image is to the query
+ * in meaning. They apply while the query is still the one searched. */
+const sem = { query: "", scores: new Map<string, number>(), seq: 0, timer: 0 };
+const semScore = (id: string) => (S.f.query && sem.query === S.f.query ? sem.scores.get(id) : undefined);
+const byRelevance = () => !!S.f.query && sem.query === S.f.query && sem.scores.size > 0;
+
+/** Searches by meaning shortly after the query stops changing. */
+function searchByMeaning(delay = 250) {
+  clearTimeout(sem.timer);
+  const q = S.f.query;
+  if (q.length < 2 || !S.ai?.search) {
+    sem.seq++;
+    if (sem.scores.size) {
+      sem.query = "";
+      sem.scores = new Map();
+      layoutDirty = true;
+      refresh();
+    }
+    return;
+  }
+  sem.timer = window.setTimeout(async () => {
+    const seq = ++sem.seq;
+    try {
+      const hits = await AI.search(q);
+      if (seq !== sem.seq || q !== S.f.query) return;
+      sem.query = q;
+      sem.scores = new Map(hits.map((h) => [h.id, h.score]));
+      layoutDirty = true;
+      content.scrollTop = 0;
+      refresh();
+    } catch (e) {
+      if (seq === sem.seq) fail(e);
+    }
+  }, delay);
+}
+
+/** A description's sentences, and the search terms of its last line. */
+function splitDescription(text: string): { body: string; keywords: string[] } {
+  const lines = text.split("\n");
+  const re = /^(keywords|key words|关键词|關鍵詞|キーワード|palabras clave|mots-clés|schlüsselwörter)\s*[:：]\s*/i;
+  const i = lines.findIndex((l) => re.test(l));
+  if (i < 0) return { body: text.trim(), keywords: [] };
+  const keywords = lines[i]!.replace(re, "").split(/[,，、;；]/).map((k) => k.trim().replace(/\.$/, "")).filter(Boolean);
+  return { body: lines.filter((_, j) => j !== i).join("\n").trim(), keywords: [...new Set(keywords)] };
 }
 
 function sourceImages(except?: keyof Filters): Image[] {
@@ -405,7 +463,29 @@ function renderSidebar() {
       </div>
       ${topTags.length ? `<div class="side-section"><div class="side-heading">Tags</div>${tagHTML}</div>` : ""}
     </div>
-    ${imgs.length ? `<div class="side-foot"><div class="storage">${storage}</div><span class="num">${plural(imgs.length, "image")} · ${fmtBytes(bytes)}</span></div>` : ""}`;
+    ${imgs.length ? `<div class="side-foot">${aiFoot()}<div class="storage">${storage}</div><span class="num">${plural(imgs.length, "image")} · ${fmtBytes(bytes)}</span></div>` : ""}`;
+}
+
+/** How far describing has come, above the storage bar. */
+function aiFoot(): string {
+  const a = S.ai;
+  if (!a) return "";
+  if (!a.ready) return `<button type="button" class="ai-foot" data-act="ai-settings">${icons.sparkle}<span>Describe images with AI…</span></button>`;
+  if (a.paused) {
+    // Waiting for Go's allowance needs nothing from the user.
+    if (a.resumesAt) {
+      const at = new Date(a.resumesAt);
+      const when = a.resumesAt - Date.now() > 20 * 36e5 ? `${dateFmt.format(at)}, ${timeFmt.format(at)}` : timeFmt.format(at);
+      return `<div class="ai-foot paused" title="${esc(a.paused)}">${icons.sparkle}<span>Go allowance resets at ${when}</span></div>`;
+    }
+    return `<div class="ai-foot paused" title="${esc(a.paused)}">${icons.sparkle}<span>Describing paused</span><button type="button" class="link" data-act="ai-resume">Resume</button></div>`;
+  }
+  if (a.pending > 0) {
+    const pct = a.total ? Math.round((a.described / a.total) * 100) : 0;
+    return `<button type="button" class="ai-foot busy" data-act="ai-settings" title="${fmtInt(a.pending)} waiting">${icons.sparkle}<span class="bar"><i style="width:${pct}%"></i></span><span class="num">${fmtInt(a.described)} / ${fmtInt(a.total)}</span></button>`;
+  }
+  const what = a.described === a.total ? `All ${plural(a.total, "image")} described` : `${fmtInt(a.described)} of ${plural(a.total, "image")} described`;
+  return `<button type="button" class="ai-foot" data-act="ai-settings" title="${a.searchError ? esc(a.searchError) : "AI Settings…"}">${icons.sparkle}<span>${what}</span></button>`;
 }
 
 $("#sidebar").addEventListener("click", (e) => {
@@ -419,6 +499,8 @@ $("#sidebar").addEventListener("click", (e) => {
     return;
   }
   if (t.closest("[data-act=add-folder]")) return void addFolder();
+  if (t.closest("[data-act=ai-resume]")) return void AI.resume().catch(fail);
+  if (t.closest("[data-act=ai-settings]")) return void openSettings();
   const el = t.closest<HTMLElement>("[data-src],[data-folder],[data-tag]");
   if (!el) return;
   if (el.dataset.src) setSource({ kind: el.dataset.src as "all" });
@@ -487,7 +569,7 @@ function renderToolbar() {
   $("#title").textContent = isWelcome() ? "Eagle" : sourceTitle();
   const filtered = hasFilters() || S.f.query;
   let sub = filtered
-    ? `${fmtInt(items.length)} of ${plural(total, "image")} match`
+    ? `${fmtInt(items.length)} of ${plural(total, "image")} match${byRelevance() ? ", best first" : ""}`
     : `${plural(items.length, "image")} · ${fmtBytes(items.reduce((a, i) => a + i.size, 0))}`;
   if (S.source.kind === "folder") {
     const f = S.folders.find((x) => S.source.kind === "folder" && x.id === S.source.id);
@@ -498,7 +580,8 @@ function renderToolbar() {
   $("#layout-justified").classList.toggle("on", S.layout === "justified");
   $("#layout-grid").classList.toggle("on", S.layout === "grid");
   zoomInput.value = String(S.zoom);
-  $("#sort").innerHTML = `${icons.sort}<span>${SORTS.find((s) => s.id === S.sortKey)!.label}</span>`;
+  $("#sort").innerHTML = `${icons.sort}<span>${byRelevance() ? "Best Match" : SORTS.find((s) => s.id === S.sortKey)!.label}</span>`;
+  search.placeholder = S.ai?.ready ? "Search names, tags and what's in them" : "Search names, tags, folders";
   if (document.activeElement !== search) search.value = S.f.query;
   search.parentElement!.classList.toggle("filled", !!S.f.query);
   $("#search-clear").hidden = !S.f.query;
@@ -512,6 +595,7 @@ $("#toggle-inspector").addEventListener("click", () => toggleInspector());
 search.addEventListener("input", () => {
   S.f.query = search.value.trim();
   refresh();
+  searchByMeaning();
 });
 search.addEventListener("keydown", (e) => {
   if (e.key === "Escape") {
@@ -519,6 +603,7 @@ search.addEventListener("keydown", (e) => {
       search.value = "";
       S.f.query = "";
       refresh();
+      searchByMeaning();
     } else search.blur();
     e.stopPropagation();
   } else if (e.key === "Enter" || e.key === "ArrowDown") {
@@ -532,8 +617,17 @@ $("#search-clear").addEventListener("click", () => {
   search.value = "";
   S.f.query = "";
   refresh();
+  searchByMeaning();
   search.focus();
 });
+
+/** Searches for text, as a click on a description's keyword does. */
+function findText(text: string) {
+  search.value = text;
+  S.f.query = text;
+  refresh();
+  searchByMeaning(0);
+}
 $("#sort").addEventListener("click", (e) => openSortMenu(e.currentTarget as HTMLElement));
 
 function setLayout(layout: Layout) {
@@ -809,7 +903,7 @@ function computeLayout() {
   where.clear();
   const items = list();
   const groups: { label: string; items: Image[] }[] = [];
-  if (S.sortKey === "modified") {
+  if (S.sortKey === "modified" && !byRelevance()) {
     for (const img of items) {
       const label = groupLabel(img.modified);
       const last = groups[groups.length - 1];
@@ -1024,7 +1118,7 @@ function renderEmpty() {
     const src = S.source;
     const folder = src.kind === "folder" ? S.folders.find((f) => f.id === src.id) : undefined;
     if (sourceImages().length && S.f.query && !hasFilters()) {
-      html = `<h3>Nothing matches “${esc(S.f.query)}”</h3><p>Search looks at file names, tags and folder names.</p><button type="button" class="btn" data-act="clear-all">Clear Search</button>`;
+      html = `<h3>Nothing matches “${esc(S.f.query)}”</h3><p>Search looks at file names, tags, folder names, captions${S.ai?.ready ? " and descriptions" : ""}.</p><button type="button" class="btn" data-act="clear-all">Clear Search</button>`;
     } else if (sourceImages().length && (hasFilters() || S.f.query)) {
       html = `<h3>No images match</h3><p>Try another colour or type, or clear the filters.</p><button type="button" class="btn" data-act="clear-all">Clear Filters</button>`;
     } else if (folder?.missing) {
@@ -1185,6 +1279,7 @@ content.addEventListener("contextmenu", (e) => {
     { label: "Show in Finder", kbd: "⇧⌘R", run: () => Library.reveal(id).catch(fail) },
     ...(one?.link ? [{ label: linkLabel(one.link), run: () => openLink(one.link) }] : []),
     "-",
+    { label: sel.every((i) => i.description) ? "Describe Again" : "Describe with AI", kbd: "⇧⌘D", run: () => describe(sel) },
     { label: allFav ? "Remove from Favorites" : "Add to Favorites", kbd: "F", run: () => setFavorite(sel, !allFav) },
     { label: sel.length > 1 ? "Copy Paths" : "Copy Path", run: () => copyText(sel.map((i) => i.path).join("\n")) },
     "-",
@@ -1231,6 +1326,17 @@ function removeTag(imgs: Image[], tag: string) {
   for (const i of imgs) i.tags = i.tags.filter((t) => t !== tag);
   Library.removeTag(imgs.map((i) => i.id), tag).catch(fail);
   refresh();
+}
+
+/** Describes images, again when all of them have a description. */
+function describe(imgs: Image[], again = imgs.every((i) => i.description)) {
+  if (!imgs.length) return;
+  if (!S.ai?.ready) return void openSettings();
+  AI.describe(imgs.map((i) => i.id), again)
+    .then(() => {
+      if (imgs.length > 1) toast(`Describing ${plural(imgs.length, "image")}…`);
+    })
+    .catch(fail);
 }
 
 async function trash() {
@@ -1321,6 +1427,30 @@ function captionSection(img: Image): string {
     </div>`;
 }
 
+// ---------------------------------------------------------------- descriptions
+
+function descriptionSection(img: Image): string {
+  const a = S.ai;
+  const working = !!a?.working.includes(img.id);
+  if (img.description) {
+    const { body, keywords } = splitDescription(img.description);
+    return `
+      <div class="ins-section ai-desc">
+        <div class="ins-row"><h4>${icons.sparkle}Description</h4><button type="button" class="link" data-act="describe-again"${working ? " disabled" : ""}>${working ? "Describing…" : "Describe Again"}</button></div>
+        <p class="desc-text">${esc(body)}</p>
+        ${keywords.length ? `<div class="keywords">${keywords.map((k) => `<button type="button" data-act="find" data-v="${esc(k)}" title="Search for “${esc(k)}”">${esc(k)}</button>`).join("")}</div>` : ""}
+      </div>`;
+  }
+  if (working) {
+    return `<div class="ins-section ai-desc"><h4>${icons.sparkle}Description</h4><div class="desc-loading" aria-label="Describing"><i></i><i></i><i style="width:60%"></i></div></div>`;
+  }
+  if (!a?.ready) {
+    return `<div class="ins-section ai-desc"><div class="ins-row"><h4>${icons.sparkle}Description</h4><button type="button" class="link" data-act="ai-settings">Set Up AI…</button></div></div>`;
+  }
+  const waiting = a.auto && a.pending > 0 && !a.paused;
+  return `<div class="ins-section ai-desc"><div class="ins-row"><h4>${icons.sparkle}Description</h4><button type="button" class="link" data-act="describe">${waiting ? "Describe Now" : "Describe"}</button></div>${waiting ? `<p class="desc-empty">Waiting its turn…</p>` : ""}</div>`;
+}
+
 // ---------------------------------------------------------------- inspector
 
 let refocusTagInput = false;
@@ -1377,6 +1507,7 @@ function inspectOne(img: Image) {
     <div class="ins-name" title="${esc(img.name)}">${esc(img.name)}</div>
     <div class="ins-sub">${img.kind} · ${dims(img)} · ${fmtBytes(img.size)}</div>
     ${captionSection(img)}
+    ${descriptionSection(img)}
     <div class="ins-section" style="padding-top:16px">${paletteHTML(img.palette)}</div>
     <div class="ins-section">
       <div class="ins-row"><h4>Rating</h4><div style="display:flex;align-items:center;gap:4px">${starsHTML(img.rating)}<button type="button" class="fav-btn${img.favorite ? " on" : ""}" data-act="fav" aria-pressed="${img.favorite}" aria-label="Favorite" title="Favorite (F)">${img.favorite ? icons.heartFill : icons.heart}</button></div></div>
@@ -1425,6 +1556,7 @@ function inspectMany(sel: Image[]) {
     </div>
     <div class="ins-section actions-col">
       <button type="button" class="btn primary" data-act="viewer">Open ${fmtInt(sel.length)} in Viewer</button>
+      ${S.ai?.ready ? `<button type="button" class="btn" data-act="describe">${icons.sparkle}${sel.every((i) => i.description) ? `Describe ${fmtInt(sel.length)} Again` : `Describe ${fmtInt(sel.length)} with AI`}</button>` : ""}
       <div class="actions"><button type="button" class="btn" data-act="reveal">Show in Finder</button><button type="button" class="btn danger" data-act="trash">Move to Trash…</button></div>
     </div>`;
 }
@@ -1466,6 +1598,10 @@ $("#inspector").addEventListener("click", (e) => {
       schedule("inspector");
       break;
     case "viewer": openViewer(); break;
+    case "describe": describe(sel); break;
+    case "describe-again": describe(sel, true); break;
+    case "ai-settings": openSettings(); break;
+    case "find": findText(v); break;
     case "reveal": if (sel[0]) Library.reveal(sel[0].id).catch(fail); break;
     case "trash": trash(); break;
     case "rate": {
@@ -1656,6 +1792,7 @@ function renderViewerChrome() {
       ${img.caption ? `<p class="cap-text">${captionHTML(img.caption)}</p>` : ""}
       ${img.link ? `<button type="button" class="cap-link" data-act="open-link" data-v="${esc(img.link)}">${esc(linkLabel(img.link))}</button>` : ""}
     </div>` : ""}
+    ${img.description ? `<div class="cap"><div class="cap-author">Description</div><p class="cap-text desc">${esc(splitDescription(img.description).body)}</p></div>` : ""}
     ${img.palette.length ? `<div class="pal">${img.palette.map((h) => `<i style="background:${h}"></i>`).join("")}</div>` : ""}
     <dl>
       <dt>Rating</dt><dd class="${img.rating ? "rate" : ""}">${img.rating ? stars(img.rating) : "Not rated"}</dd>
@@ -1864,6 +2001,15 @@ function runCommand(cmd: string) {
   }
   const focusId = S.focus ?? [...S.selection][0];
   switch (cmd) {
+    case "settings":
+      if (viewer.open) closeViewer();
+      openSettings();
+      break;
+    case "describe": {
+      const imgs = viewer.open ? [current()].filter((i): i is Image => !!i) : selected();
+      describe(imgs);
+      break;
+    }
     case "addFolder": addFolder(); break;
     case "openViewer": openViewer(); break;
     case "quickLook": if (focusId) Library.quickLook(focusId).catch(fail); break;
@@ -1890,11 +2036,12 @@ events.command.on(runCommand);
 
 // Outside MyGo there is no menu bar, so the page takes its shortcuts.
 const BROWSER_SHORTCUTS: Record<string, string> = {
-  o: "addFolder", f: "find", i: "toggleInspector", "1": "layoutJustified", "2": "layoutGrid",
+  o: "addFolder", f: "find", i: "toggleInspector", "1": "layoutJustified", "2": "layoutGrid", ",": "settings",
   "=": "zoomIn", "-": "zoomOut", Backspace: "trash", y: "quickLook",
 };
 
 document.addEventListener("keydown", (e) => {
+  if (settingsOpen()) return settingsKey(e);
   if (viewer.open) return viewerKey(e);
   const t = e.target as HTMLElement;
   const typing = t.matches("input, textarea, [contenteditable]");
@@ -2035,6 +2182,222 @@ events.imageUpdates.on((updates) => {
   }
 });
 
+events.descriptions.on((descs) => {
+  let shown = false;
+  for (const d of descs) {
+    const img = S.images.get(d.id);
+    if (!img) continue;
+    img.description = d.description;
+    if (S.selection.has(d.id) || (viewer.open && current()?.id === d.id)) shown = true;
+  }
+  if (S.f.query) {
+    refresh();
+    // New vectors come a moment after descriptions.
+    searchByMeaning(2500);
+  } else if (shown) schedule("inspector");
+  if (shown && viewer.open) renderViewerChrome();
+});
+
+function setAIStatus(st: AIStatus) {
+  const before = S.ai;
+  S.ai = st;
+  schedule("sidebar", "toolbar");
+  // The inspector is redrawn only when what it shows changed, so a tag
+  // being typed keeps its focus.
+  const sel = S.selection;
+  const changed = (id: string) => before?.working.includes(id) !== st.working.includes(id);
+  if (!before || before.ready !== st.ready || before.paused !== st.paused || (before.pending > 0) !== (st.pending > 0) || [...sel].some(changed)) {
+    schedule("inspector");
+  }
+  if (before?.search !== st.search && S.f.query) searchByMeaning(0);
+  if (settings) renderSettingsStatus();
+}
+events.aiStatus.on(setAIStatus);
+
+// ---------------------------------------------------------------- AI settings
+
+const sheet = $("#sheet");
+let settings: { cfg: AIConfig; test: { state: "busy" | "ok" | "error"; text: string } | null } | null = null;
+const settingsOpen = () => !!settings;
+
+async function openSettings() {
+  try {
+    const cfg = await AI.config();
+    closePopover();
+    settings = { cfg, test: null };
+    renderSettings();
+    sheet.hidden = false;
+    sheet.querySelector<HTMLElement>(cfg.hasKey ? "#ai-model" : "#ai-key")?.focus();
+  } catch (e) {
+    fail(e);
+  }
+}
+
+function closeSettings() {
+  settings = null;
+  sheet.hidden = true;
+  sheet.innerHTML = "";
+  content.focus({ preventScroll: true });
+}
+
+function renderSettings() {
+  if (!settings) return;
+  const { cfg } = settings;
+  const st = cfg.settings;
+  const models = cfg.models;
+  const known = models.some((m) => m.id === st.model);
+  sheet.innerHTML = `
+    <div class="sheet-card" role="dialog" aria-modal="true" aria-labelledby="sheet-title">
+      <header>
+        <span class="sheet-icon">${icons.sparkle}</span>
+        <div>
+          <h2 id="sheet-title">AI Descriptions</h2>
+          <p>Eagle sends each image's thumbnail to OpenCode Go, where a vision model describes it. Search then finds images by what's in them, not only by their names.</p>
+        </div>
+      </header>
+      <div class="field">
+        <label class="label" for="ai-key">API key</label>
+        <div>
+          <div class="key-row">
+            <input id="ai-key" type="password" placeholder="${cfg.hasKey ? "Saved in your Keychain" : "Paste your OpenCode API key"}" autocomplete="off" spellcheck="false">
+            <button type="button" class="btn" data-act="save-key">Save</button>
+            ${cfg.hasKey ? `<button type="button" class="btn" data-act="remove-key">Remove</button>` : ""}
+          </div>
+          <p class="hint">A key of a workspace with OpenCode Go, from the <a href="https://opencode.ai/console" data-act="console">OpenCode console</a>. Eagle keeps it in your Keychain.</p>
+        </div>
+      </div>
+      <div class="field">
+        <label class="label" for="ai-model">Model</label>
+        <div>
+          <select id="ai-model">
+            ${known ? "" : `<option value="${esc(st.model)}" selected>${esc(st.model)}</option>`}
+            ${models.map((m) => `<option value="${esc(m.id)}"${m.id === st.model ? " selected" : ""}>${esc(m.name)}</option>`).join("")}
+          </select>
+          <p class="hint">${known ? `${esc(models.find((m) => m.id === st.model)!.price)} per million tokens in and out, from your Go allowance. When it runs out, describing waits for it to reset.` : "Descriptions count toward your Go allowance. When it runs out, describing waits for it to reset."}</p>
+        </div>
+      </div>
+      <div class="field">
+        <label class="label" for="ai-lang">Language</label>
+        <div><input id="ai-lang" value="${esc(st.language)}" spellcheck="false" placeholder="English"></div>
+      </div>
+      <label class="check"><input type="checkbox" data-set="auto"${st.auto ? " checked" : ""}><span><b>Describe every image</b><small id="ai-auto-hint"></small></span></label>
+      <label class="check"><input type="checkbox" data-set="search"${st.search ? " checked" : ""}><span><b>Search by meaning</b><small>Finds “dog on a beach” even when no word matches, using OpenCode Zen's embeddings, about 2 cents per thousand images. They need a Zen balance in the same workspace.</small><small class="err" id="ai-search-err"></small></span></label>
+      <footer>
+        <div class="test-result" id="ai-test"></div>
+        <button type="button" class="btn" data-act="test">Test</button>
+        <button type="button" class="btn primary" data-act="done">Done</button>
+      </footer>
+    </div>`;
+  renderSettingsStatus();
+}
+
+/** The parts of the sheet that follow the status, which change without
+ * redrawing what is being typed. */
+function renderSettingsStatus() {
+  if (!settings) return;
+  const a = S.ai;
+  const left = a ? a.total - a.described : 0;
+  const auto = sheet.querySelector("#ai-auto-hint");
+  if (auto) {
+    auto.textContent = a?.paused
+      ? `Paused: ${a.paused}`
+      : left > 0
+        ? `${plural(left, "image")} ${left === 1 ? "isn't" : "aren't"} described yet. New images are described as they arrive.`
+        : "New images are described as they arrive. Otherwise, describe images from their menu.";
+  }
+  const err = sheet.querySelector("#ai-search-err");
+  if (err) err.textContent = a?.searchError ?? "";
+  const test = sheet.querySelector<HTMLElement>("#ai-test");
+  if (test) {
+    const t = settings.test;
+    test.className = `test-result${t ? " " + t.state : ""}`;
+    test.textContent = !t ? "" : t.state === "busy" ? "Asking the model to describe a test image…" : t.text;
+    test.title = t?.text ?? "";
+  }
+}
+
+async function saveSettings(patch: Partial<AISettings>) {
+  if (!settings) return;
+  const next = { ...settings.cfg.settings, ...patch };
+  settings.cfg.settings = next;
+  settings.test = null;
+  renderSettings();
+  try {
+    settings.cfg.settings = await AI.setSettings(next);
+  } catch (e) {
+    fail(e);
+  }
+}
+
+async function saveKey(key: string) {
+  if (!settings) return;
+  try {
+    await AI.setKey(key);
+    settings.cfg = await AI.config();
+    renderSettings();
+    toast(key ? "API key saved in your Keychain" : "API key removed");
+  } catch (e) {
+    fail(e);
+  }
+}
+
+async function testSettings() {
+  if (!settings) return;
+  const key = sheet.querySelector<HTMLInputElement>("#ai-key")?.value ?? "";
+  const { model } = settings.cfg.settings;
+  settings.test = { state: "busy", text: "" };
+  renderSettingsStatus();
+  try {
+    const text = await AI.test(key, model);
+    if (settings) settings.test = { state: "ok", text: `It works: “${splitDescription(text).body}”` };
+  } catch (e) {
+    if (settings) settings.test = { state: "error", text: errorMessage(e) };
+  }
+  renderSettingsStatus();
+}
+
+sheet.addEventListener("click", (e) => {
+  const t = e.target as HTMLElement;
+  if (t === sheet) return closeSettings();
+  const el = t.closest<HTMLElement>("[data-act]");
+  switch (el?.dataset.act) {
+    case "done": return closeSettings();
+    case "test": return void testSettings();
+    case "save-key": {
+      const input = sheet.querySelector<HTMLInputElement>("#ai-key")!;
+      if (input.value.trim()) saveKey(input.value);
+      else input.focus();
+      return;
+    }
+    case "remove-key": return void saveKey("");
+    case "console":
+      e.preventDefault();
+      openLink("https://opencode.ai/console");
+      return;
+  }
+});
+sheet.addEventListener("change", (e) => {
+  const t = e.target as HTMLInputElement;
+  if (t.id === "ai-model") saveSettings({ model: t.value });
+  else if (t.id === "ai-lang") saveSettings({ language: t.value.trim() || "English" });
+  else if (t.dataset.set === "auto") saveSettings({ auto: t.checked });
+  else if (t.dataset.set === "search") saveSettings({ search: t.checked });
+});
+
+function settingsKey(e: KeyboardEvent) {
+  const t = e.target as HTMLElement;
+  if (e.key === "Escape") {
+    e.preventDefault();
+    closeSettings();
+  } else if (e.key === "Enter" && t.id === "ai-key") {
+    e.preventDefault();
+    const v = (t as HTMLInputElement).value;
+    if (v.trim()) saveKey(v);
+  } else if (e.key === "Enter" && t.id === "ai-lang") {
+    (t as HTMLInputElement).blur();
+  }
+}
+
 // ---------------------------------------------------------------- start
 
 async function start() {
@@ -2042,6 +2405,7 @@ async function start() {
     const snap = await Library.snapshot();
     S.folders = snap.folders;
     for (const img of snap.images) S.images.set(img.id, img);
+    S.ai = await AI.status();
   } catch (e) {
     if (isMyGo()) fail(e);
   }

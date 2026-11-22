@@ -15,7 +15,19 @@ func command(name string) func(*mygo.MenuItem, *mygo.Window) {
 
 func menu() *mygo.Menu {
 	return mygo.NewMenu([]*mygo.MenuItem{
-		{Role: mygo.RoleAppMenu},
+		{Label: "Eagle", Submenu: []*mygo.MenuItem{
+			{Role: mygo.RoleAbout},
+			mygo.Separator(),
+			{Label: "Settings…", Accelerator: "CmdOrCtrl+,", Click: command("settings")},
+			mygo.Separator(),
+			{Role: mygo.RoleServices},
+			mygo.Separator(),
+			{Role: mygo.RoleHide},
+			{Role: mygo.RoleHideOthers},
+			{Role: mygo.RoleUnhide},
+			mygo.Separator(),
+			{Role: mygo.RoleQuit},
+		}},
 		{Label: "File", Submenu: []*mygo.MenuItem{
 			{Label: "Add Folder…", Accelerator: "CmdOrCtrl+O", Click: command("addFolder")},
 			mygo.Separator(),
@@ -24,6 +36,8 @@ func menu() *mygo.Menu {
 			{Label: "Show in Finder", Accelerator: "CmdOrCtrl+Shift+R", Click: command("reveal")},
 			mygo.Separator(),
 			{Label: "Move to Trash", Accelerator: "CmdOrCtrl+Backspace", Click: command("trash")},
+			mygo.Separator(),
+			{Label: "Describe with AI", Accelerator: "CmdOrCtrl+Shift+D", Click: command("describe")},
 			mygo.Separator(),
 			{Role: mygo.RoleClose},
 		}},
@@ -50,6 +64,7 @@ func menu() *mygo.Menu {
 func main() {
 	lib := newLibrary()
 	mygo.Bind(lib)
+	mygo.Bind(lib.ai)
 	if err := mygo.Protocol.Handle("eagle", mediaHandler{lib}); err != nil {
 		log.Fatal(err)
 	}
