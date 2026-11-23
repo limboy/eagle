@@ -49,7 +49,7 @@ The images appear with their captions as soon as they're downloaded. Sidecars ar
 
 ## AI descriptions and search
 
-Eagle can send each image's thumbnail to [OpenCode Go](https://opencode.ai/docs/go/), where a vision model describes it in a few sentences and a line of keywords. The description shows in the inspector and the viewer's info panel, and clicking a keyword searches for it. Search then matches the words of descriptions, and with **Search by meaning** on it also finds images whose descriptions are close in meaning to what you type, best first: "a person walking alone" finds the lone figure on a path, and 撑伞的人 finds the one with an umbrella though its description is in English.
+Eagle can send a small copy of each image, 512 pixels on its longest edge, to [OpenCode Go](https://opencode.ai/docs/go/), where a vision model describes it in a few sentences and a line of keywords. The description shows in the inspector and the viewer's info panel, and clicking a keyword searches for it. Search then matches the words of descriptions, and with **Search by meaning** on it also finds images whose descriptions are close in meaning to what you type, best first: "a person walking alone" finds the lone figure on a path, and 撑伞的人 finds the one with an umbrella though its description is in English.
 
 To set it up, choose **Eagle › Settings…** (⌘,):
 

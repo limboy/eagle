@@ -32,6 +32,7 @@ import (
 	"time"
 
 	"github.com/egoist/mygo"
+	"golang.org/x/image/draw"
 )
 
 // service is the part of OpenCode a request goes to.
@@ -136,8 +137,20 @@ var visionModels = []AIModel{
 
 const (
 	defaultModel = "deepseek-v4.1-flash"
-	// workers is how many images are described at once.
-	workers = 3
+	// workers is how many images are described at once at most. When
+	// OpenCode says to slow down, fewer are, and more again as requests go
+	// through.
+	workers = 8
+	// sendSize is the longest edge of the image a model is sent, in
+	// pixels: enough for a few sentences, and fewer tokens than the
+	// thumbnail.
+	sendSize = 512
+	// maxOutput caps a description's tokens, well above what one takes.
+	maxOutput = 1024
+	// embedBatch is how many texts one request embeds, and embedAtOnce
+	// how many such requests run at once.
+	embedBatch  = 256
+	embedAtOnce = 3
 	// keyName is the API key's name in the Keychain.
 	keyName = "opencode-api-key"
 )
@@ -189,6 +202,18 @@ type AI struct {
 	resume  *time.Timer
 	resumes time.Time
 	fails   int // failures in a row, which pause describing
+	// limit is how many images are described at once now, up to workers;
+	// it halves when OpenCode answers 429 but no allowance ran out, and no
+	// request starts before hold.
+	limit     int
+	hold      time.Time
+	holdTimer *time.Timer
+	bursts    int           // such 429s in a row, which wait longer each
+	okRun     int           // images described since limit last changed
+	backoff   time.Duration // the first wait after such a 429
+	// plain marks models that refused the options describeImage sends
+	// first: 1 without reasoning_effort "none", 2 without any.
+	plain map[string]int
 
 	embedWait  map[string]string // texts waiting for vectors, by key
 	embedTimer *time.Timer
@@ -224,6 +249,9 @@ func newAI(lib *Library) *AI {
 		redo:       map[string]bool{},
 		working:    map[string]bool{},
 		failed:     map[string]bool{},
+		limit:      workers,
+		backoff:    5 * time.Second,
+		plain:      map[string]int{},
 		embedWait:  map[string]string{},
 		queryVecs:  map[string][]float32{},
 		session:    "eagle-" + hex.EncodeToString(b),
@@ -541,16 +569,28 @@ func (a *AI) sync() {
 func (a *AI) pump() {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	for a.running < workers && len(a.queue) > 0 && a.paused == "" && a.key != "" {
+	if time.Now().Before(a.hold) {
+		return // holdLocked's timer pumps again
+	}
+	for a.running < a.limit && len(a.queue) > 0 && a.paused == "" && a.key != "" {
 		a.running++
 		go a.work()
 	}
 }
 
+// holdLocked starts no request for d, then pumps.
+func (a *AI) holdLocked(d time.Duration) {
+	a.hold = time.Now().Add(d)
+	if a.holdTimer != nil {
+		a.holdTimer.Stop()
+	}
+	a.holdTimer = time.AfterFunc(d, a.pump)
+}
+
 func (a *AI) work() {
 	for {
 		a.mu.Lock()
-		if len(a.queue) == 0 || a.paused != "" || a.key == "" {
+		if len(a.queue) == 0 || a.paused != "" || a.key == "" || a.running > a.limit || time.Now().Before(a.hold) {
 			a.running--
 			a.mu.Unlock()
 			a.changed()
@@ -571,8 +611,14 @@ func (a *AI) work() {
 		a.mu.Lock()
 		delete(a.working, id)
 		if err == nil {
-			a.fails = 0
+			a.fails, a.bursts = 0, 0
+			// Going well: describe one more at once every so often.
+			if a.okRun++; a.okRun >= 20 && a.limit < workers {
+				a.limit++
+				a.okRun = 0
+			}
 			a.mu.Unlock()
+			a.pump()
 			a.changed()
 			continue
 		}
@@ -583,20 +629,35 @@ func (a *AI) work() {
 			a.pauseLocked(friendly(err, goService).Error(), 0)
 			a.requeueLocked(id, redo)
 		case isAPI && ae.status == 429:
-			// Go's allowance ran out: wait for it, however long that is.
-			wait := ae.retryAfter
-			if wait <= 0 {
+			a.requeueLocked(id, redo)
+			// A long Retry-After, or Go's usage saying a limit is reached,
+			// means the allowance ran out; otherwise too many requests
+			// went at once.
+			wait, out := ae.retryAfter, ae.retryAfter > 2*time.Minute
+			if !out {
 				a.mu.Unlock()
-				wait = a.goResetIn(key)
+				if w, ok := a.goReset(key); ok {
+					wait, out = w, true
+				}
 				a.mu.Lock()
 			}
-			at := time.Now().Add(wait)
-			when := at.Format("15:04")
-			if wait > 20*time.Hour {
-				when = at.Format("Mon 2 Jan, 15:04")
+			if out {
+				// Wait for the allowance, however long that is.
+				at := time.Now().Add(wait)
+				when := at.Format("15:04")
+				if wait > 20*time.Hour {
+					when = at.Format("Mon 2 Jan, 15:04")
+				}
+				a.pauseLocked(fmt.Sprintf("Your OpenCode Go allowance ran out. Describing goes on at %s, when it resets.", when), wait)
+			} else if !time.Now().Before(a.hold) {
+				// The first of the requests that ran into it: describe half
+				// as many at once, after a wait that doubles each time.
+				a.limit = max(1, a.limit/2)
+				a.okRun = 0
+				back := min(a.backoff<<min(a.bursts, 7), 10*time.Minute)
+				a.bursts++
+				a.holdLocked(max(back, wait))
 			}
-			a.pauseLocked(fmt.Sprintf("Your OpenCode Go allowance ran out. Describing goes on at %s, when it resets.", when), wait)
-			a.requeueLocked(id, redo)
 		default:
 			// This image failed; others may work. Many failures in a row
 			// pause describing below.
@@ -671,7 +732,7 @@ func (a *AI) describeOne(key string, s AISettings, id string, redo bool) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
-	text, err := a.describeImage(ctx, key, s, data)
+	text, err := a.describeImage(ctx, key, s, shrinkJPEG(data, sendSize))
 	if err != nil {
 		return err
 	}
@@ -690,36 +751,95 @@ func (a *AI) describeOne(key string, s AISettings, id string, redo bool) error {
 	return nil
 }
 
-// describeImage asks the model to describe a JPEG.
+// shrinkJPEG returns a JPEG no longer than size on its longest edge: data
+// itself when it already is, or can't be read.
+func shrinkJPEG(data []byte, size int) []byte {
+	cfg, err := jpeg.DecodeConfig(bytes.NewReader(data))
+	if err != nil || max(cfg.Width, cfg.Height) <= size {
+		return data
+	}
+	src, err := jpeg.Decode(bytes.NewReader(data))
+	if err != nil {
+		return data
+	}
+	w, h := size, max(1, int(math.Round(float64(cfg.Height)*float64(size)/float64(cfg.Width))))
+	if cfg.Height > cfg.Width {
+		w, h = max(1, int(math.Round(float64(cfg.Width)*float64(size)/float64(cfg.Height)))), size
+	}
+	out := image.NewRGBA(image.Rect(0, 0, w, h))
+	draw.BiLinear.Scale(out, out.Bounds(), src, src.Bounds(), draw.Src, nil)
+	var buf bytes.Buffer
+	if jpeg.Encode(&buf, out, &jpeg.Options{Quality: 80}) != nil {
+		return data
+	}
+	return buf.Bytes()
+}
+
+// describeImage asks the model to describe a JPEG. It asks for no
+// reasoning and a capped answer, which models answer sooner; a model that
+// refuses either, or runs out of tokens thinking anyway, is asked again
+// without, and from then on.
 func (a *AI) describeImage(ctx context.Context, key string, s AISettings, jpeg []byte) (string, error) {
 	prompt := fmt.Sprintf(describePrompt, s.Language)
-	body := map[string]any{
-		"model": s.Model,
-		"messages": []any{
-			map[string]any{"role": "user", "content": []any{
-				map[string]any{"type": "image_url", "image_url": map[string]any{"url": "data:image/jpeg;base64," + base64.StdEncoding.EncodeToString(jpeg)}},
-				map[string]any{"type": "text", "text": prompt},
-			}},
-		},
+	for {
+		a.mu.Lock()
+		plain := a.plain[s.Model]
+		a.mu.Unlock()
+		body := map[string]any{
+			"model": s.Model,
+			"messages": []any{
+				map[string]any{"role": "user", "content": []any{
+					map[string]any{"type": "image_url", "image_url": map[string]any{"url": "data:image/jpeg;base64," + base64.StdEncoding.EncodeToString(jpeg)}},
+					map[string]any{"type": "text", "text": prompt},
+				}},
+			},
+		}
+		if plain < 2 {
+			body["max_tokens"] = maxOutput
+			body["reasoning_effort"] = "none"
+			if plain == 1 {
+				body["reasoning_effort"] = "low"
+			}
+		}
+		var res struct {
+			Choices []struct {
+				Message struct {
+					Content json.RawMessage `json:"content"`
+				} `json:"message"`
+				FinishReason string `json:"finish_reason"`
+			} `json:"choices"`
+		}
+		err := a.post(ctx, key, a.goURL+"/chat/completions", body, &res)
+		var ae *apiError
+		if plain < 2 && errors.As(err, &ae) && (ae.status == 400 || ae.status == 422) {
+			a.plainer(s.Model, plain, err)
+			continue
+		}
+		if err != nil {
+			return "", err
+		}
+		if len(res.Choices) == 0 {
+			return "", errors.New("the model sent no description")
+		}
+		c := res.Choices[0]
+		if plain < 2 && c.FinishReason == "length" {
+			a.plainer(s.Model, 1, errors.New("it ran out of tokens"))
+			continue
+		}
+		text := cleanDescription(contentText(c.Message.Content))
+		if text == "" {
+			return "", errors.New("the model sent an empty description")
+		}
+		return text, nil
 	}
-	var res struct {
-		Choices []struct {
-			Message struct {
-				Content json.RawMessage `json:"content"`
-			} `json:"message"`
-		} `json:"choices"`
-	}
-	if err := a.post(ctx, key, a.goURL+"/chat/completions", body, &res); err != nil {
-		return "", err
-	}
-	if len(res.Choices) == 0 {
-		return "", errors.New("the model sent no description")
-	}
-	text := cleanDescription(contentText(res.Choices[0].Message.Content))
-	if text == "" {
-		return "", errors.New("the model sent an empty description")
-	}
-	return text, nil
+}
+
+// plainer sends a model fewer options than plain from now on.
+func (a *AI) plainer(model string, plain int, why error) {
+	log.Printf("eagle: %s: asking with fewer options, as %v", model, why)
+	a.mu.Lock()
+	a.plain[model] = max(a.plain[model], plain+1)
+	a.mu.Unlock()
 }
 
 const describePrompt = `Describe this image so it can be found by searching for what it shows.
@@ -728,11 +848,10 @@ Write 2 to 4 plain sentences: the subject, the setting, notable objects and peop
 
 Write in %s. Don't add a title, a preamble or markdown.`
 
-// goResetIn asks Go when the allowance that ran out comes back: the latest
-// reset of its limits that are reached. Without an answer it guesses ten
-// minutes, and tries again then.
-func (a *AI) goResetIn(key string) time.Duration {
-	const guess = 10 * time.Minute
+// goReset asks Go whether an allowance ran out and when it comes back: the
+// latest reset of its limits that are reached. ok is false when none is,
+// or Go doesn't say.
+func (a *AI) goReset(key string) (wait time.Duration, ok bool) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	var res struct {
@@ -743,7 +862,7 @@ func (a *AI) goResetIn(key string) time.Duration {
 	}
 	if err := a.get(ctx, key, a.goUsageURL, &res); err != nil {
 		log.Printf("eagle: Go usage: %v", err)
-		return guess
+		return 0, false
 	}
 	var latest time.Time
 	for _, u := range res.Usage {
@@ -755,10 +874,10 @@ func (a *AI) goResetIn(key string) time.Duration {
 		}
 	}
 	if latest.IsZero() {
-		return guess
+		return 0, false
 	}
 	// A moment after the reset, so the first request falls after it.
-	return max(time.Until(latest)+30*time.Second, time.Minute)
+	return max(time.Until(latest)+30*time.Second, time.Minute), true
 }
 
 // parseTime reads a time sent as RFC 3339 text or as Unix seconds or
@@ -858,7 +977,8 @@ func (a *AI) scheduleEmbed() {
 	}
 }
 
-// embedPending embeds the texts waiting for vectors, a batch at a time.
+// embedPending embeds the texts waiting for vectors, a few batches at a
+// time.
 func (a *AI) embedPending() {
 	a.mu.Lock()
 	a.embedTimer = nil
@@ -880,30 +1000,54 @@ func (a *AI) embedPending() {
 			return
 		}
 		key := a.key
-		var keys, texts []string
+		type batch struct {
+			keys, texts []string
+			vecs        [][]float32
+			err         error
+		}
+		var batches []*batch
 		for k, t := range a.embedWait {
-			keys = append(keys, k)
-			texts = append(texts, t)
-			if len(keys) == 64 {
-				break
+			if len(batches) == 0 || len(batches[len(batches)-1].keys) == embedBatch {
+				if len(batches) == embedAtOnce {
+					break
+				}
+				batches = append(batches, &batch{})
 			}
+			b := batches[len(batches)-1]
+			b.keys = append(b.keys, k)
+			b.texts = append(b.texts, t)
 		}
 		a.mu.Unlock()
-		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
-		vs, err := a.embed(ctx, key, texts, false)
-		cancel()
-		if err != nil {
-			a.searchFailed(err)
-			return
+		var wg sync.WaitGroup
+		for _, b := range batches {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+				defer cancel()
+				b.vecs, b.err = a.embed(ctx, key, b.texts, false)
+			}()
 		}
+		wg.Wait()
+		var failed error
 		a.mu.Lock()
-		for i, k := range keys {
-			a.vecs[k] = vs[i]
-			delete(a.embedWait, k)
+		for _, b := range batches {
+			if b.err != nil {
+				failed = b.err
+				continue
+			}
+			for i, k := range b.keys {
+				a.vecs[k] = b.vecs[i]
+				delete(a.embedWait, k)
+			}
 		}
 		a.mu.Unlock()
 		a.saveVectors()
 		a.changed()
+		if failed != nil {
+			a.searchFailed(failed)
+			return
+		}
 	}
 }
 

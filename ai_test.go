@@ -1,10 +1,14 @@
 package main
 
 import (
+	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"image"
 	"image/color"
+	"image/jpeg"
 	"image/png"
 	"net/http"
 	"net/http/httptest"
@@ -29,6 +33,9 @@ type fakeOpenCode struct {
 	resetsAt string // when Go's usage says the rate-limited window resets
 	lastBody map[string]any
 	paths    []string
+	// rejectReasoning answers 400 to chats that set reasoning_effort, as
+	// models without the option do.
+	rejectReasoning bool
 }
 
 func (f *fakeOpenCode) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -49,6 +56,11 @@ func (f *fakeOpenCode) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{"usage":{"rolling":{"status":"rate-limited","percent":100,"resetsAt":"` + f.resetsAt + `"},"weekly":{"status":"ok","percent":40,"resetsAt":"2099-01-01T00:00:00Z"}}}`))
 	case strings.HasSuffix(r.URL.Path, "/chat/completions"):
 		f.chats++
+		if _, ok := body["reasoning_effort"]; ok && f.rejectReasoning {
+			w.WriteHeader(400)
+			_, _ = w.Write([]byte(`{"error":{"message":"Unrecognized request argument supplied: reasoning_effort"}}`))
+			return
+		}
 		if f.status != 0 {
 			if f.retry != "" {
 				w.Header().Set("Retry-After", f.retry)
@@ -406,5 +418,102 @@ func TestRank(t *testing.T) {
 		if got := ids(c.hits); got != c.want {
 			t.Errorf("%s: rank kept %q, want %q", c.name, got, c.want)
 		}
+	}
+}
+
+func TestTooManyAtOnceSlowsDown(t *testing.T) {
+	// 429 while Go's usage says no limit is reached: too many requests.
+	fake := &fakeOpenCode{status: 429}
+	_, a := testLibrary(t, fake)
+	a.backoff = 50 * time.Millisecond
+	a.sync()
+	waitFor(t, "a slower pace", func() bool {
+		a.mu.Lock()
+		defer a.mu.Unlock()
+		return a.limit < workers
+	})
+	if st := a.status(); st.Paused != "" {
+		t.Errorf("paused = %q, want it to wait and go on by itself", st.Paused)
+	}
+	fake.mu.Lock()
+	fake.status = 0
+	fake.mu.Unlock()
+	waitFor(t, "descriptions after the wait", func() bool { return a.status().Described == 2 })
+}
+
+func TestAsksForNoReasoningThenWithout(t *testing.T) {
+	fake := &fakeOpenCode{}
+	_, a := testLibrary(t, fake)
+	if _, err := a.describeImage(context.Background(), "good-key", defaultSettings(), testImage()); err != nil {
+		t.Fatal(err)
+	}
+	fake.mu.Lock()
+	if fake.lastBody["reasoning_effort"] != "none" || fake.lastBody["max_tokens"] != float64(maxOutput) {
+		t.Errorf("body = %v, want reasoning_effort none and max_tokens %d", fake.lastBody, maxOutput)
+	}
+	fake.rejectReasoning = true
+	fake.mu.Unlock()
+	if _, err := a.describeImage(context.Background(), "good-key", defaultSettings(), testImage()); err != nil {
+		t.Fatalf("a model without the option failed: %v", err)
+	}
+	fake.mu.Lock()
+	chats := fake.chats
+	_, sent := fake.lastBody["reasoning_effort"]
+	fake.mu.Unlock()
+	if sent {
+		t.Error("still sent reasoning_effort to a model that refused it")
+	}
+	// Once refused, the model is asked without it straight away.
+	if _, err := a.describeImage(context.Background(), "good-key", defaultSettings(), testImage()); err != nil {
+		t.Fatal(err)
+	}
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+	if fake.chats != chats+1 {
+		t.Errorf("%d requests for one description, want 1", fake.chats-chats)
+	}
+}
+
+func TestShrinkJPEG(t *testing.T) {
+	img := image.NewRGBA(image.Rect(0, 0, 720, 540))
+	var buf bytes.Buffer
+	if err := jpeg.Encode(&buf, img, nil); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := jpeg.DecodeConfig(bytes.NewReader(shrinkJPEG(buf.Bytes(), 512)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Width != 512 || cfg.Height != 384 {
+		t.Errorf("shrunk to %dx%d, want 512x384", cfg.Width, cfg.Height)
+	}
+	small := testImage()
+	if got := shrinkJPEG(small, 512); !bytes.Equal(got, small) {
+		t.Error("changed an image already small enough")
+	}
+}
+
+func TestEmbedsInParallelBatches(t *testing.T) {
+	fake := &fakeOpenCode{}
+	_, a := testLibrary(t, fake)
+	n := embedBatch*embedAtOnce + 10
+	a.mu.Lock()
+	a.settings.Search = true
+	for i := range n {
+		text := fmt.Sprintf("text number %d", i)
+		a.embedWait[embedKey(text)] = text
+	}
+	a.mu.Unlock()
+	a.embedPending()
+	a.mu.Lock()
+	left, got := len(a.embedWait), len(a.vecs)
+	a.mu.Unlock()
+	if left != 0 || got != n {
+		t.Errorf("%d vectors and %d texts waiting, want %d and 0", got, left, n)
+	}
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+	if want := embedAtOnce + 1; fake.embeds != want {
+		t.Errorf("%d requests, want %d", fake.embeds, want)
 	}
 }
