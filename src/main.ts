@@ -418,7 +418,7 @@ function renderSidebar() {
     const subs = [...(subdirs.get(f.id) ?? new Map<string, number>())].sort((a, b) => collator.compare(a[0], b[0]));
     const open = S.expanded.has(f.id);
     const isActive = src.kind === "folder" && src.id === f.id && !src.dir;
-    folders += `<button type="button" class="side-item${isActive ? " active" : ""}${f.missing ? " missing" : ""}" data-folder="${f.id}" title="${esc(f.path)}" style="padding-left:4px">
+    folders += `<button type="button" class="side-item folder${isActive ? " active" : ""}${f.missing ? " missing" : ""}" data-folder="${f.id}" title="${esc(f.path)}">
       <span class="disclose${open ? " open" : ""}${subs.length ? "" : " none"}" data-toggle="${f.id}">${icons.chevron}</span>
       ${f.missing ? icons.folderAlert : icons.folder}<span class="label">${esc(f.name)}</span><span class="count">${fmtInt(f.count)}</span></button>`;
     if (f.indexing && f.indexing.total > 0) {
@@ -448,7 +448,14 @@ function renderSidebar() {
     .map((k) => `<i style="flex:${byKind.get(k)};background:${KIND_COLOR[k]}" title="${k} · ${fmtBytes(byKind.get(k)!)}"></i>`)
     .join("");
 
-  $("#sidebar").innerHTML = `
+  // WebKit doesn't hover freshly inserted elements until the mouse moves, so
+  // the section's + button and the row's highlight would blink off and back
+  // on. Carry the hover over to the new elements until the pointer moves.
+  const sidebar = $("#sidebar");
+  const hoverable = () => [...sidebar.querySelectorAll<HTMLElement>(".side-section, .side-item")];
+  const hovered = hoverable().flatMap((el, i) => (el.matches(":hover") ? [i] : []));
+
+  sidebar.innerHTML = `
     <div class="side-scroll">
       <div class="side-section">
         <div class="side-heading">Library</div>
@@ -464,6 +471,14 @@ function renderSidebar() {
       ${topTags.length ? `<div class="side-section"><div class="side-heading">Tags</div>${tagHTML}</div>` : ""}
     </div>
     ${imgs.length ? `<div class="side-foot">${aiFoot()}<div class="storage">${storage}</div><span class="num">${plural(imgs.length, "image")} · ${fmtBytes(bytes)}</span></div>` : ""}`;
+
+  if (hovered.length) {
+    const now = hoverable();
+    for (const i of hovered) now[i]?.classList.add("hovered");
+    const clear = () => sidebar.querySelectorAll(".hovered").forEach((el) => el.classList.remove("hovered"));
+    sidebar.addEventListener("pointermove", clear, { once: true });
+    sidebar.addEventListener("pointerleave", clear, { once: true });
+  }
 }
 
 /** How far describing has come, above the storage bar. */
