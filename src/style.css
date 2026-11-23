@@ -175,14 +175,13 @@ html:not(.mygo) .sidebar::before {
 
 .side-foot {
   flex: none;
-  padding: 12px 20px 14px;
+  height: 44px; padding: 0 14px 0 22px;
   border-top: 0.5px solid var(--hairline);
-  display: flex; flex-direction: column; gap: 7px;
+  display: flex; align-items: center; gap: 8px;
   font-size: 11px; color: var(--text-2);
   --app-region: no-drag;
 }
-.storage { display: flex; gap: 1.5px; height: 4px; border-radius: 2px; overflow: hidden; background: var(--fill); }
-.storage i { display: block; height: 100%; }
+.side-foot .num { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* ---------------- main ---------------- */
 
@@ -641,20 +640,17 @@ dl.info dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; o
 @keyframes shimmer { to { background-position: -200% 0; } }
 .actions-col .btn .icon { width: 13px; height: 13px; color: var(--accent); }
 
-.ai-foot {
-  display: flex; align-items: center; gap: 7px;
-  height: 22px; margin: -3px -6px 2px; padding: 0 6px;
-  border: 0; border-radius: 6px;
-  background: none; color: var(--text-2); font-size: 11px; text-align: left;
+.ai-btn {
+  flex: none; display: grid; place-items: center;
+  width: 24px; height: 24px;
+  border: 0; border-radius: 6px; background: none;
+  color: var(--accent);
 }
-.ai-foot .icon { flex: none; width: 13px; height: 13px; color: var(--accent); }
-.ai-foot > span:not(.bar) { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-button.ai-foot:hover { background: var(--fill); color: var(--text); }
-.ai-foot .bar { flex: 1; height: 3px; border-radius: 2px; background: var(--fill-active); overflow: hidden; }
-.ai-foot .bar i { display: block; height: 100%; background: var(--accent); border-radius: 2px; transition: width 0.25s; }
-.ai-foot.busy .num { flex: none; font-variant-numeric: tabular-nums; }
-.ai-foot.paused .icon { color: var(--star); }
-.ai-foot .link { flex: none; padding: 2px 5px; font-size: 11px; }
+.ai-btn .icon { width: 14px; height: 14px; }
+.ai-btn:is(:hover, .hovered) { background: var(--fill-hover); }
+.ai-btn.paused { color: var(--star); }
+.ai-btn.busy .icon { animation: ai-pulse 1.6s ease-in-out var(--phase, 0s) infinite; }
+@keyframes ai-pulse { 50% { opacity: 0.35; } }
 
 /* ---------------- AI settings sheet ---------------- */
 

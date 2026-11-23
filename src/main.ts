@@ -395,7 +395,6 @@ function renderSidebar() {
   };
   const subdirs = new Map<string, Map<string, number>>();
   const tags = new Map<string, number>();
-  const byKind = new Map<Kind, number>();
   let bytes = 0;
   for (const img of imgs) {
     if (img.dir) {
@@ -405,7 +404,6 @@ function renderSidebar() {
       m.set(top, (m.get(top) ?? 0) + 1);
     }
     for (const t of img.tags) tags.set(t, (tags.get(t) ?? 0) + 1);
-    byKind.set(img.kind, (byKind.get(img.kind) ?? 0) + img.size);
     bytes += img.size;
   }
   const src = S.source;
@@ -446,15 +444,11 @@ function renderSidebar() {
     })
     .join("");
 
-  const storage = KINDS.filter((k) => byKind.get(k))
-    .map((k) => `<i style="flex:${byKind.get(k)};background:${KIND_COLOR[k]}" title="${k} · ${fmtBytes(byKind.get(k)!)}"></i>`)
-    .join("");
-
   // WebKit doesn't hover freshly inserted elements until the mouse moves, so
   // the section's + button and the row's highlight would blink off and back
   // on. Carry the hover over to the new elements until the pointer moves.
   const sidebar = $("#sidebar");
-  const hoverable = () => [...sidebar.querySelectorAll<HTMLElement>(".side-section, .side-item")];
+  const hoverable = () => [...sidebar.querySelectorAll<HTMLElement>(".side-section, .side-item, .ai-btn")];
   const hovered = hoverable().flatMap((el, i) => (el.matches(":hover") ? [i] : []));
 
   sidebar.innerHTML = `
@@ -472,7 +466,7 @@ function renderSidebar() {
       </div>
       ${topTags.length ? `<div class="side-section"><div class="side-heading">Tags</div>${tagHTML}</div>` : ""}
     </div>
-    ${imgs.length ? `<div class="side-foot">${aiFoot()}<div class="storage">${storage}</div><span class="num">${plural(imgs.length, "image")} · ${fmtBytes(bytes)}</span></div>` : ""}`;
+    ${imgs.length ? `<div class="side-foot"><span class="num">${plural(imgs.length, "image")} · ${fmtBytes(bytes)}</span>${aiButton()}</div>` : ""}`;
 
   if (hovered.length) {
     const now = hoverable();
@@ -483,26 +477,40 @@ function renderSidebar() {
   }
 }
 
-/** How far describing has come, above the storage bar. */
-function aiFoot(): string {
-  const a = S.ai;
-  if (!a) return "";
-  if (!a.ready) return `<button type="button" class="ai-foot" data-act="ai-settings">${icons.sparkle}<span>Describe images with AI…</span></button>`;
+/** Where describing stands, in a few words. */
+function aiStatus(a: AIStatus): string {
+  if (!a.ready) return "Describe Images with AI…";
   if (a.paused) {
     // Waiting for Go's allowance needs nothing from the user.
     if (a.resumesAt) {
       const at = new Date(a.resumesAt);
       const when = a.resumesAt - Date.now() > 20 * 36e5 ? `${dateFmt.format(at)}, ${timeFmt.format(at)}` : timeFmt.format(at);
-      return `<div class="ai-foot paused" title="${esc(a.paused)}">${icons.sparkle}<span>Go allowance resets at ${when}</span></div>`;
+      return `Go allowance resets at ${when}`;
     }
-    return `<div class="ai-foot paused" title="${esc(a.paused)}">${icons.sparkle}<span>Describing paused</span><button type="button" class="link" data-act="ai-resume">Resume</button></div>`;
+    return "Describing paused";
   }
-  if (a.pending > 0) {
-    const pct = a.total ? Math.round((a.described / a.total) * 100) : 0;
-    return `<button type="button" class="ai-foot busy" data-act="ai-settings" title="${fmtInt(a.pending)} waiting">${icons.sparkle}<span class="bar"><i style="width:${pct}%"></i></span><span class="num">${fmtInt(a.described)} / ${fmtInt(a.total)}</span></button>`;
-  }
-  const what = a.described === a.total ? `All ${plural(a.total, "image")} described` : `${fmtInt(a.described)} of ${plural(a.total, "image")} described`;
-  return `<button type="button" class="ai-foot" data-act="ai-settings" title="${a.searchError ? esc(a.searchError) : "AI Settings…"}">${icons.sparkle}<span>${what}</span></button>`;
+  if (a.pending > 0) return `Describing ${fmtInt(a.described)} / ${fmtInt(a.total)}`;
+  return a.described === a.total ? `All ${plural(a.total, "image")} described` : `${fmtInt(a.described)} of ${plural(a.total, "image")} described`;
+}
+
+/** The sparkle at the right of the sidebar's foot; it opens the AI menu. */
+function aiButton(): string {
+  const a = S.ai;
+  if (!a) return "";
+  const state = !a.ready ? "" : a.paused ? " paused" : a.pending > 0 ? " busy" : "";
+  const tip = a.paused || a.searchError || aiStatus(a);
+  // The sidebar re-renders as images get described; keep the pulse in phase.
+  const phase = state === " busy" ? ` style="--phase:-${Date.now() % 1600}ms"` : "";
+  return `<button type="button" class="ai-btn${state}" id="ai-menu" data-act="ai-menu" aria-label="AI" aria-haspopup="true" title="${esc(tip)}"${phase}>${icons.sparkle}</button>`;
+}
+
+function openAIMenu(anchor: HTMLElement) {
+  if (pop?.anchor?.id === anchor.id) return closePopover();
+  const a = S.ai;
+  if (!a) return;
+  const items: MenuItem[] = [{ label: aiStatus(a), run: openSettings }];
+  if (a.paused && !a.resumesAt) items.push({ label: "Resume Describing", run: () => AI.resume().catch(fail) });
+  openMenu(anchor, items);
 }
 
 $("#sidebar").addEventListener("click", (e) => {
@@ -516,8 +524,8 @@ $("#sidebar").addEventListener("click", (e) => {
     return;
   }
   if (t.closest("[data-act=add-folder]")) return void addFolder();
-  if (t.closest("[data-act=ai-resume]")) return void AI.resume().catch(fail);
-  if (t.closest("[data-act=ai-settings]")) return void openSettings();
+  const ai = t.closest<HTMLElement>("[data-act=ai-menu]");
+  if (ai) return void openAIMenu(ai);
   const el = t.closest<HTMLElement>("[data-src],[data-folder],[data-tag]");
   if (!el) return;
   if (el.dataset.src) setSource({ kind: el.dataset.src as "all" });
@@ -769,6 +777,8 @@ document.addEventListener("mousedown", (e) => {
   if (!pop) return;
   const t = e.target as Node;
   if (popover.contains(t) || (pop.anchor && pop.anchor.contains(t))) return;
+  // The sidebar re-renders while describing; its fresh button is the same anchor.
+  if (pop.anchor?.id && (t as Element).closest?.(`#${pop.anchor.id}`)) return;
   closePopover();
 }, true);
 window.addEventListener("blur", closePopover);
@@ -858,7 +868,7 @@ function openSortMenu(anchor: HTMLElement) {
 }
 
 type MenuItem = "-" | { label: string; kbd?: string; danger?: boolean; disabled?: boolean; run: () => void };
-function openMenu(at: { x: number; y: number }, items: MenuItem[]) {
+function openMenu(at: HTMLElement | { x: number; y: number }, items: MenuItem[]) {
   const runs: (() => void)[] = [];
   showPopover(at, () =>
     items.map((it) => {
