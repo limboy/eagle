@@ -486,7 +486,7 @@ html:not(.mygo) .sidebar::before {
 .ins {
   width: var(--inspector-w); height: 100%;
   overflow-y: auto;
-  padding: 54px 20px 24px;
+  padding: 22px 20px 24px;
 }
 .ins::-webkit-scrollbar { width: 0; }
 
