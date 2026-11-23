@@ -418,13 +418,15 @@ function renderSidebar() {
     const subs = [...(subdirs.get(f.id) ?? new Map<string, number>())].sort((a, b) => collator.compare(a[0], b[0]));
     const open = S.expanded.has(f.id);
     const isActive = src.kind === "folder" && src.id === f.id && !src.dir;
+    let ring = "";
+    if (f.indexing && f.indexing.total > 0) {
+      const { done, total } = f.indexing;
+      const pct = Math.min(100, (done / total) * 100);
+      ring = `<span class="ring" title="Indexing ${fmtInt(done)} of ${fmtInt(total)} (${Math.floor(pct)}%)" role="progressbar" aria-valuenow="${Math.floor(pct)}" aria-valuemin="0" aria-valuemax="100"><svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><circle cx="7" cy="7" r="5.25"/><circle cx="7" cy="7" r="5.25" pathLength="100" stroke-dasharray="${pct.toFixed(1)} 100"/></svg></span>`;
+    }
     folders += `<button type="button" class="side-item folder${isActive ? " active" : ""}${f.missing ? " missing" : ""}" data-folder="${f.id}" title="${esc(f.path)}">
       <span class="disclose${open ? " open" : ""}${subs.length ? "" : " none"}" data-toggle="${f.id}">${icons.chevron}</span>
-      ${f.missing ? icons.folderAlert : icons.folder}<span class="label">${esc(f.name)}</span><span class="count">${fmtInt(f.count)}</span></button>`;
-    if (f.indexing && f.indexing.total > 0) {
-      const pct = Math.round((f.indexing.done / f.indexing.total) * 100);
-      folders += `<div class="indexing"><span class="bar"><i style="width:${pct}%"></i></span><span class="num">Indexing ${fmtInt(f.indexing.done)} / ${fmtInt(f.indexing.total)}</span></div>`;
-    }
+      ${f.missing ? icons.folderAlert : icons.folder}<span class="label">${esc(f.name)}</span>${ring}<span class="count">${fmtInt(f.count)}</span></button>`;
     if (open) {
       for (const [dir, count] of subs) {
         const on = src.kind === "folder" && src.id === f.id && src.dir === dir;
