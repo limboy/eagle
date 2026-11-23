@@ -292,6 +292,7 @@ html:not(.mygo) .sidebar::before {
   position: relative;
   flex: 1; min-height: 0;
   overflow-y: auto; overflow-x: hidden;
+  scrollbar-gutter: stable;
   outline: none;
 }
 .content::-webkit-scrollbar { width: 11px; }

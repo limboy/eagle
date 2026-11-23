@@ -889,6 +889,11 @@ interface Block { top: number; height: number; head?: { label: string; count: nu
 let blocks: Block[] = [];
 let layoutDirty = true;
 let layoutWidth = 0;
+// Lay out as if the scrollbar were always there. Measuring the space left
+// beside it instead would loop when the grid is about one screen tall: the
+// scrollbar appears, tiles shrink, it goes away, tiles grow, and so on.
+const SCROLLBAR = 11; // .content::-webkit-scrollbar
+const viewWidth = () => content.offsetWidth - SCROLLBAR;
 const where = new Map<string, { block: number; x: number; w: number; top: number; h: number }>();
 const mountedBlocks = new Map<number, HTMLElement>();
 const tiles = new Map<string, HTMLElement>(); // mounted tiles by image ID
@@ -924,8 +929,8 @@ function justify(items: Image[], width: number, target: number): Placed[][] {
 }
 
 function computeLayout() {
-  const width = Math.max(200, content.clientWidth - 40);
-  layoutWidth = content.clientWidth;
+  const width = Math.max(200, viewWidth() - 40);
+  layoutWidth = viewWidth();
   blocks = [];
   where.clear();
   const items = list();
@@ -1061,7 +1066,7 @@ function mountVisible() {
 }
 
 function renderGrid() {
-  const relayout = layoutDirty || content.clientWidth !== layoutWidth;
+  const relayout = layoutDirty || viewWidth() !== layoutWidth;
   if (relayout) {
     // Keep the image at the top of the view where it is.
     let anchorId: string | null = null;
@@ -1105,7 +1110,7 @@ content.addEventListener("scroll", () => {
   if (!frame) requestAnimationFrame(mountVisible);
 }, { passive: true });
 new ResizeObserver(() => {
-  if (content.clientWidth !== layoutWidth) schedule("grid");
+  if (viewWidth() !== layoutWidth) schedule("grid");
 }).observe(content);
 
 // Pictures fade in once loaded.
