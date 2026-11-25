@@ -4,6 +4,7 @@ import (
 	"log"
 
 	"github.com/egoist/mygo"
+	"github.com/egoist/mygo/plugins/updater"
 )
 
 // Command is a menu command the page carries out, such as "addFolder".
@@ -17,6 +18,7 @@ func menu() *mygo.Menu {
 	return mygo.NewMenu([]*mygo.MenuItem{
 		{Label: "Eagle", Submenu: []*mygo.MenuItem{
 			{Role: mygo.RoleAbout},
+			updater.MenuItem(),
 			mygo.Separator(),
 			{Label: "Settings…", Accelerator: "CmdOrCtrl+,", Click: command("settings")},
 			mygo.Separator(),
@@ -62,6 +64,8 @@ func menu() *mygo.Menu {
 }
 
 func main() {
+	// Checks GitHub releases in the background and offers new versions.
+	mygo.Use(updater.Plugin)
 	lib := newLibrary()
 	mygo.Bind(lib)
 	mygo.Bind(lib.ai)

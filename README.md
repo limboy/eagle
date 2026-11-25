@@ -94,13 +94,17 @@ In the viewer: ← → move between images, + − zoom, 0 fits the image to the 
 
 ## Install
 
-Eagle is built from source. It needs macOS, [Go](https://go.dev) 1.27 or later and [Bun](https://bun.sh).
+Download the disk image of the [latest release](https://github.com/limboy/eagle/releases/latest), open it and drag Eagle to Applications. Releases are signed with a Developer ID and notarized, and Eagle updates itself: it checks for a new version in the background, and **Eagle › Check for Updates…** checks now.
+
+### From source
+
+Building Eagle needs macOS, [Go](https://go.dev) 1.27 or later and [Bun](https://bun.sh).
 
 ```bash
 bun run install:app
 ```
 
-This builds Eagle for your Mac, installs it in `/Applications` (or `~/Applications` if `/Applications` isn't writable), replacing any copy already there, and opens it. Run it again after pulling changes to update. To install without opening, pass `--no-open` to `scripts/install.sh`; to install somewhere else, set `INSTALL_DIR`. The app is signed ad hoc, which is fine for the Mac that built it; to share it with other Macs, it needs a Developer ID signature and notarization (see `mygo build`).
+This builds Eagle for your Mac, installs it in `/Applications` (or `~/Applications` if `/Applications` isn't writable), replacing any copy already there, and opens it. Run it again after pulling changes to update. To install without opening, pass `--no-open` to `scripts/install.sh`; to install somewhere else, set `INSTALL_DIR`. It's signed with the Developer ID in `mygo.config.ts` when that identity is in your keychain, and not notarized.
 
 ## Development
 
@@ -128,6 +132,19 @@ Other scripts:
 - `bun run typecheck` and `go vet ./...` check the code.
 - `go test ./...` runs the Go tests. They talk to a fake OpenCode; `TestLiveOpenCode` talks to the real one when `OPENCODE_API_KEY` and `EAGLE_LIVE_DIR` are set (see `ai_live_test.go`).
 
+### Releasing
+
+1. Set `version` in `package.json` and add a `## <version>` section to `CHANGELOG.md`; it becomes the release notes the update window shows.
+2. Commit, then tag and push: `git tag v0.2.0 && git push origin main v0.2.0`.
+
+The [Release workflow](.github/workflows/release.yml) then builds a universal app, signs it with the Developer ID, notarizes it, and publishes it to GitHub Releases with its signed update. Installed copies update to it. It reads these repository secrets:
+
+| Secret | What |
+| --- | --- |
+| `MACOS_CERTIFICATE` | The Developer ID Application `.p12`, base64-encoded |
+| `APPLE_API_KEY`, `APPLE_API_KEY_ID`, `APPLE_API_ISSUER` | The App Store Connect API key (`.p8`), its ID and its issuer ID, for notarization |
+| `MYGO_UPDATER_PRIVATE_KEY` | The secret key that signs updates, from `mygo keygen`. Installed apps accept only updates signed with it, so keep a copy safe |
+
 ### Where things are
 
 | Path | What |
@@ -144,5 +161,7 @@ Other scripts:
 | `resources/icon.png` | App icon |
 | `design/` | Icon source: `make-icon.py` writes `icon.svg` |
 | `scripts/install.sh` | Builds Eagle and installs it in Applications |
+| `.github/workflows/release.yml` | Builds, signs, notarizes and publishes a release when a version tag is pushed |
+| `CHANGELOG.md` | Release notes, one section per version |
 
 The library (folders, ratings, favourites and tags) is saved in `~/Library/Application Support/Eagle/library.json`. Thumbnails, previews and the index are kept in `~/Library/Caches/Eagle/`. Ratings and tags live in Eagle's library, not in your image files. Development builds use `Eagle Dev` in place of `Eagle` for both folders.
