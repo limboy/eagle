@@ -21,7 +21,7 @@ Eagle indexes folders where they are. Nothing is imported, copied or moved, and 
 - **AI descriptions and search.** A vision model can describe each image, and search then finds images by what's in them, even in another language. See [AI descriptions and search](#ai-descriptions-and-search).
 - **File handling.** Quick Look, Show in Finder, Open with the default app, and Move to Trash with Undo.
 
-Supported formats are JPEG, PNG, GIF, WebP, HEIC, TIFF, BMP, AVIF and camera RAW (ARW, CR2, CR3, NEF, RAF, DNG, ORF, RW2, PEF, SRW). Formats a web view can't show are converted to JPEG previews with macOS's `sips`.
+Supported formats are JPEG, PNG, GIF, WebP, HEIC, TIFF, BMP, AVIF, JPEG XL and camera RAW (ARW, CR2, CR3, NEF, RAF, DNG, ORF, RW2, PEF, SRW). Formats a web view can't show are converted to JPEG previews with macOS's `sips`.
 
 ## Captions from sidecar files
 

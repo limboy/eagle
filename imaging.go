@@ -39,6 +39,7 @@ const (
 	KindTIFF Kind = "TIFF"
 	KindBMP  Kind = "BMP"
 	KindAVIF Kind = "AVIF"
+	KindJXL  Kind = "JXL"
 	KindRAW  Kind = "RAW"
 )
 
@@ -51,6 +52,7 @@ var kindByExt = map[string]Kind{
 	".tif":  KindTIFF, ".tiff": KindTIFF,
 	".bmp":  KindBMP,
 	".avif": KindAVIF,
+	".jxl":  KindJXL,
 	".arw":  KindRAW, ".cr2": KindRAW, ".cr3": KindRAW, ".nef": KindRAW, ".raf": KindRAW,
 	".dng": KindRAW, ".orf": KindRAW, ".rw2": KindRAW, ".pef": KindRAW, ".srw": KindRAW,
 }

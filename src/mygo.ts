@@ -168,7 +168,7 @@ export interface ImageUpdate {
 }
 
 /** Kind is the family of an image file, as the Type filter shows it. */
-export type Kind = "JPG" | "PNG" | "HEIC" | "WEBP" | "GIF" | "TIFF" | "BMP" | "AVIF" | "RAW";
+export type Kind = "JPG" | "PNG" | "HEIC" | "WEBP" | "GIF" | "TIFF" | "BMP" | "AVIF" | "JXL" | "RAW";
 
 /** Progress counts the images of a folder indexed so far. */
 export interface Progress {

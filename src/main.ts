@@ -87,14 +87,14 @@ const COLORS = [
 ];
 const colorHex = (name: string) => COLORS.find((c) => c.name === name)?.hex ?? "#8E8E93";
 
-const KINDS: Kind[] = ["JPG", "HEIC", "PNG", "WEBP", "GIF", "RAW", "TIFF", "AVIF", "BMP"];
+const KINDS: Kind[] = ["JPG", "HEIC", "PNG", "WEBP", "GIF", "RAW", "TIFF", "AVIF", "JXL", "BMP"];
 const KIND_LABEL: Record<Kind, string> = {
   JPG: "JPEG image", PNG: "PNG image", HEIC: "HEIC image", WEBP: "WebP image", GIF: "GIF image",
-  TIFF: "TIFF image", BMP: "BMP image", AVIF: "AVIF image", RAW: "Camera RAW",
+  TIFF: "TIFF image", BMP: "BMP image", AVIF: "AVIF image", JXL: "JPEG XL image", RAW: "Camera RAW",
 };
 const KIND_COLOR: Record<Kind, string> = {
   JPG: "#3E7BFA", HEIC: "#12A594", PNG: "#F5C443", WEBP: "#8E4EC6", GIF: "#E93D82",
-  RAW: "#F76B15", TIFF: "#8F6A4A", AVIF: "#46A758", BMP: "#8E8E93",
+  RAW: "#F76B15", TIFF: "#8F6A4A", AVIF: "#46A758", JXL: "#0090FF", BMP: "#8E8E93",
 };
 const TAG_COLORS = ["#46A758", "#F76B15", "#3E7BFA", "#8E4EC6", "#E93D82", "#12A594", "#F5C443", "#E5484D"];
 const tagColor = (t: string) => TAG_COLORS[hash(t) % TAG_COLORS.length]!;
